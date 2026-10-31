@@ -67,6 +67,10 @@ def main():
         return subprocess.Popen(['ip', 'netns', 'exec', 'ovp-test', 'openvpn', '--config', '/tmp/e2e.ovpn',
                                  '--log', '/tmp/e2e-client.log', '--connect-retry', '1', '1'])
 
+    def no_open_session():
+        with q._db() as db:
+            return db.execute('SELECT count(*) FROM sessions WHERE closed=0').fetchone()[0] == 0
+
     def connected():
         p = Path('/tmp/e2e-client.log')
         return p.exists() and 'Initialization Sequence Completed' in p.read_text()
@@ -86,6 +90,7 @@ def main():
         print('PASS: internet HTTPS routed through VPN', flush=True)
         q.update_limits('e2e', 1, 30)
         wait_for(lambda: q.status('e2e').reason == 'volume_exhausted', 'volume exhausted')
+        wait_for(no_open_session, 'exhausted active connection terminated by server')
         # A fresh connect must be rejected by hook, not just dropped by polling.
         client.terminate()
         client.wait(timeout=10)
@@ -99,10 +104,7 @@ def main():
         client = start_client()
         wait_for(connected, 'renewed allowance reconnects')
         post('/users/e2e/toggle', dict(enabled='0'))
-        wait_for(lambda: 'SIGTERM[soft,server-pushed-connection-reset]' in Path('/tmp/e2e-client.log').read_text()
-                 or 'Connection reset' in Path('/tmp/e2e-client.log').read_text()
-                 or 'AUTH_FAILED' in Path('/tmp/e2e-client.log').read_text()
-                 or 'SIGUSR1' in Path('/tmp/e2e-client.log').read_text(), 'disabled active client disconnected')
+        wait_for(no_open_session, 'disabled active connection terminated by server')
         client.terminate()
         client.wait(timeout=10)
         q.set_enabled('e2e', True)
@@ -111,7 +113,7 @@ def main():
         with q._db() as db:
             db.execute('UPDATE users SET first_connected=? WHERE name=?', (int(time.time())-31*86400, 'e2e'))
         wait_for(lambda: q.status('e2e').reason == 'expired', 'expiry reached')
-        time.sleep(4)
+        wait_for(no_open_session, 'expired active connection terminated by server')
         # Certificate rotation from web must revoke old certificate at TLS level.
         client.terminate()
         client.wait(timeout=10)

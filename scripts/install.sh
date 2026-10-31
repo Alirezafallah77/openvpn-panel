@@ -84,6 +84,7 @@ install -d -m 0755 /etc/openvpn/server
 # Make DB before OpenVPN hooks run. All writers use group-compatible journals.
 sudo -u openvpn-panel /opt/openvpn-panel/.venv/bin/python -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from quota import Quotas; Quotas('/var/lib/openvpn-panel/quota.sqlite')"
 chmod 0660 /var/lib/openvpn-panel/quota.sqlite
+install -m 0755 "$SOURCE/scripts/panelctl.py" /usr/local/sbin/openvpn-panelctl
 install -m 0644 "$SOURCE"/deploy/*.service /etc/systemd/system/
 install -d /etc/systemd/system/openvpn-server@panel.service.d
 install -m 0644 "$SOURCE/deploy/openvpn-override.conf" /etc/systemd/system/openvpn-server@panel.service.d/panel.conf

@@ -32,19 +32,26 @@ def profile(name, action='download', root=ROOT):
         base = pki / ('client-' + name)
         key, csr, cert = (Path(str(base) + ext) for ext in ('.key', '.csr', '.crt'))
         config = str(pki / 'openssl.cnf')
+        # A durable intent allows retry after interrupted revocation/CRL updates.
+        intent = Path(str(base) + '.rotation-pending')
         if action == 'rotate' and cert.exists():
-            # Collector is the sole management client; request a disconnect using
-            # a root-only marker. Admission hook denies while marker is pending.
-            pending = Path('/var/lib/openvpn-panel-revocations') / ('revoke-' + name)
-            command('openssl', 'ca', '-batch', '-config', config, '-revoke', str(cert))
-            # Write CRL atomically. OpenVPN reads it on every handshake.
+            intent.touch(mode=0o600)
+        if intent.exists():
+            if cert.exists():
+                try:
+                    command('openssl', 'ca', '-batch', '-config', config, '-revoke', str(cert))
+                except subprocess.CalledProcessError as error:
+                    if b'Already revoked' not in error.stderr:
+                        raise
             tmp = root / 'crl.tmp'
             command('openssl', 'ca', '-batch', '-config', config, '-gencrl', '-out', str(tmp))
             tmp.chmod(0o644)
             tmp.replace(root / 'crl.pem')
+            pending = Path('/var/lib/openvpn-panel-revocations') / ('revoke-' + name)
             pending.touch(mode=0o600)
-            cert.unlink()
+            cert.unlink(missing_ok=True)
             key.unlink(missing_ok=True)
+            intent.unlink()
         if not cert.exists():
             command('openssl', 'req', '-new', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:prime256v1',
                     '-nodes', '-keyout', str(key), '-out', str(csr), '-subj', '/CN=' + name)
