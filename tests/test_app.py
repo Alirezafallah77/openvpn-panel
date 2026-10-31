@@ -252,3 +252,63 @@ class WebTests(unittest.TestCase):
             self.assertIn('درخواست تغییر تنظیمات اجرا نشده است'.encode(),result.data)
             self.assertNotIn(b'wrong-root-password',result.data)
             broker.assert_not_called()
+
+    def test_quick_create_defaults_and_multiple_users_without_navigation(self):
+        self.login()
+        page=self.client.get('/')
+        self.assertIn(b'data-create-user',page.data)
+        self.assertIn(b'name="gib" min="1" max="100000" value="50"',page.data)
+        self.client.get('/login')
+        with self.client.session_transaction() as session:
+            csrf=session['csrf']
+        for name in ('alice','bob','charlie'):
+            response=self.client.post('/users',data=dict(csrf=csrf,name=name),headers={'Accept':'application/json'})
+            self.assertEqual(response.status_code,200)
+            self.assertTrue(response.is_json)
+            self.assertEqual(response.json['name'],name)
+            self.assertIn('/s/',response.json['subscription_url'])
+            self.assertEqual(response.headers['Cache-Control'],'no-store')
+            self.assertEqual(self.q.status(name).limit_bytes,50*1024**3)
+            self.assertEqual(self.q.status(name).days,30)
+            self.assertIsNone(self.q.status(name).first_connected)
+            path=response.json['subscription_url'].split('http://localhost',1)[-1]
+            self.assertEqual(self.client.get(path).status_code,200)
+        self.assertEqual(len(self.q.list_users()),3)
+
+    def test_quick_create_duplicate_validation_auth_and_csrf(self):
+        self.login()
+        self.client.get('/login')
+        with self.client.session_transaction() as session:
+            csrf=session['csrf']
+        headers={'Accept':'application/json'}
+        self.assertEqual(self.client.post('/users',data=dict(name='alice'),headers=headers).status_code,400)
+        first=self.client.post('/users',data=dict(csrf=csrf,name='alice',gib=75,days=60),headers=headers)
+        self.assertEqual(first.status_code,200)
+        duplicate=self.client.post('/users',data=dict(csrf=csrf,name='alice',gib=50,days=30),headers=headers)
+        self.assertEqual(duplicate.status_code,400)
+        self.assertIn('قبلاً',duplicate.json['error'])
+        self.assertNotIn('subscription_url',duplicate.json)
+        self.assertEqual(self.q.status('alice').limit_bytes,75*1024**3)
+        self.assertEqual(self.q.status('alice').days,60)
+        for name,gib,days in [('<script>',50,30),('bob',0,30),('bob',50,0),('bob','',30)]:
+            response=self.client.post('/users',data=dict(csrf=csrf,name=name,gib=gib,days=days),headers=headers)
+            self.assertEqual(response.status_code,400)
+            self.assertTrue(response.is_json)
+        self.post('/logout')
+        self.client.get('/login')
+        with self.client.session_transaction() as session:
+            csrf=session['csrf']
+        self.assertEqual(self.client.post('/users',data=dict(csrf=csrf,name='bob'),headers=headers).status_code,302)
+
+    def test_create_without_javascript_keeps_form_and_selected_limits(self):
+        self.login()
+        response=self.post('/users',dict(name='alice',gib=80,days=90))
+        self.assertEqual(response.status_code,200)
+        self.assertIn(b'data-create-user',response.data)
+        self.assertIn(b'value="80"',response.data)
+        self.assertIn(b'value="90"',response.data)
+        self.assertIn(b'/s/',response.data)
+        invalid=self.post('/users',dict(name='alice',gib=80,days=90))
+        self.assertEqual(invalid.status_code,400)
+        self.assertIn(b'value="alice"',invalid.data)
+        self.assertIn(b'data-create-user',invalid.data)

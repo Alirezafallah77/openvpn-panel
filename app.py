@@ -11,7 +11,7 @@ from functools import wraps
 from pathlib import Path
 from threading import Lock
 
-from flask import Flask, Response, send_file, abort, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, Response, send_file, abort, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from quota import Quotas
 from vpn.client import request_profile, maintenance_request
@@ -69,7 +69,7 @@ def create_app(config=None):
         response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Content-Security-Policy'] = "default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+        response.headers['Content-Security-Policy'] = "default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self'; connect-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
         if request.is_secure:
             response.headers['Strict-Transport-Security'] = 'max-age=31536000'
         return response
@@ -125,17 +125,31 @@ def create_app(config=None):
     @app.post('/users')
     @admin
     def create_user():
+        wants_json = request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']
+        name = request.form.get('name', '')
+        gib_text = request.form.get('gib', '50')
+        days_text = request.form.get('days', '30')
+        error = None
         try:
-            gib = int(request.form.get('gib', ''))
-            days = int(request.form.get('days', ''))
+            gib, days = int(gib_text), int(days_text)
             if not 1 <= gib <= 100000 or not 1 <= days <= 3650:
                 raise ValueError()
-            name = request.form.get('name', '')
             token = quotas.create_user(name, gib * 1024**3, days)
-        except (ValueError, sqlite3.IntegrityError):
-            return render_template('message.html', error='نام تکراری یا مقادیر نامعتبر است.'), 400
+        except ValueError:
+            error = 'نام باید ۱ تا ۶۴ حرف انگلیسی، عدد، خط تیره یا زیرخط باشد؛ حجم و روزها نیز باید در بازهٔ مجاز باشند.'
+        except sqlite3.IntegrityError:
+            error = 'این نام قبلاً ثبت شده است؛ نام دیگری انتخاب کنید.'
+        if error:
+            if wants_json:
+                return jsonify(error=error), 400
+            return render_template('message.html', error=error, create_another=True,
+                                   form_name=name, form_gib=gib_text, form_days=days_text), 400
         app.logger.info('Admin created user=%s', name)
-        return render_template('message.html', token=token, name=name)
+        if wants_json:
+            return jsonify(name=name, subscription_url=url_for('subscription', token=token, _external=True),
+                           profile_url=url_for('download_profile', name=name) if app.config['VPN_CONFIGURED'] else None)
+        return render_template('message.html', token=token, name=name, create_another=True,
+                               form_gib=gib, form_days=days)
 
     @app.post('/users/<name>/toggle')
     @admin

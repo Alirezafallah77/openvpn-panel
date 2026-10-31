@@ -1,0 +1,15 @@
+<section id="user-create" class="create-panel">
+<div class="section-heading"><div><span class="eyebrow">QUICK CREATE</span><h2>ساخت کاربر جدید</h2></div><span class="header-tag">پیش‌فرض: ۵۰ گیگ · ۳۰ روز</span></div>
+<p>کاربران را پشت سر هم بسازید؛ نام پاک می‌شود، حجم و مدت انتخابی می‌ماند. اعتبار از اولین اتصال موفق شروع می‌شود.</p>
+<form action="{{ url_for('create_user') }}" method="post" class="row quick-create" data-create-user>
+<input type="hidden" name="csrf" value="{{ csrf }}">
+<label for="new-user-name">نام کاربر<input id="new-user-name" name="name" dir="ltr" pattern="[A-Za-z0-9_\-]{1,64}" value="{{ form_name|default('') }}" placeholder="مثلاً client_01" autocomplete="off" autocapitalize="none" spellcheck="false" required maxlength="64" aria-describedby="create-name-help"></label>
+<label for="new-user-gib">حجم کل (GiB)<input id="new-user-gib" type="number" name="gib" min="1" max="100000" value="{{ form_gib|default(50) }}" required></label>
+<label for="new-user-days">اعتبار (روز)<input id="new-user-days" type="number" name="days" min="1" max="3650" value="{{ form_days|default(30) }}" required></label>
+<button type="submit">＋ ساخت و آماده‌سازی کاربر بعدی</button>
+</form>
+<p id="create-name-help" class="muted">نام انگلیسی، عدد، خط تیره یا زیرخط؛ حداکثر ۶۴ نویسه. حجم برحسب GiB (۱۰۲۴³ بایت) است.</p>
+<p data-create-status role="status" aria-live="polite"></p><p data-create-error role="alert" hidden></p>
+<div class="created-list" data-created-results aria-label="کاربران ساخته‌شده در این صفحه"></div>
+<p class="muted">لینک‌های ساخته‌شده در همین صفحه می‌مانند تا کپی کنید. با خروج یا بازخوانی صفحه از بین می‌روند؛ در مرورگر ذخیره نمی‌شوند. آمار و فهرست اصلی پس از <a href="{{ url_for('dashboard') }}">به‌روزرسانی داشبورد</a> تازه می‌شوند. بازخوانی، لینک‌های معتبر را باطل نمی‌کند.</p>
+</section>
