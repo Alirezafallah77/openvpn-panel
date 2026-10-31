@@ -4,6 +4,7 @@ import hashlib
 import secrets
 import sqlite3
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 
 SCHEMA = '''
@@ -42,11 +43,21 @@ class Quotas:
         with self._db() as db:
             db.executescript(SCHEMA)
 
+    @contextmanager
     def _db(self):
         db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
-        db.row_factory = sqlite3.Row
-        db.execute('PRAGMA foreign_keys=ON')
-        return db
+        try:
+            db.row_factory = sqlite3.Row
+            db.execute('PRAGMA foreign_keys=ON')
+            yield db
+            if db.in_transaction:
+                db.commit()
+        except BaseException:
+            if db.in_transaction:
+                db.rollback()
+            raise
+        finally:
+            db.close()
 
     @staticmethod
     def _time(now):
