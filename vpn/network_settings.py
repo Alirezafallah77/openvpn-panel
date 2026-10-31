@@ -28,7 +28,7 @@ def domain(value):
     if type(value) is not str:
         raise ValueError('Invalid domain')
     value = value.strip().lower().rstrip('.')
-    if not value.isascii() or len(value) > 253 or '.' not in value:
+    if not value.isascii() or len(value) > 253 or '.' not in value or value.split('.')[-1].isdigit():
         raise ValueError('Use a fully qualified ASCII DNS name')
     try:
         ipaddress.ip_address(value)
@@ -263,7 +263,8 @@ def apply_ssl(request, saved):
         fcntl.flock(lock,fcntl.LOCK_EX)
         lines = [line for line in (ROOT/'panel.env').read_text().splitlines()
                  if not line.startswith(('PANEL_HOST=','PANEL_EXTRA_HOSTS=','PANEL_LOCAL_HTTP='))]
-        lines.extend(['PANEL_HOST='+host,'PANEL_EXTRA_HOSTS='+(old if old and old!=host else 'localhost')])
+        alias = old if old and old!=host else environment().get('PANEL_EXTRA_HOSTS','localhost')
+        lines.extend(['PANEL_HOST='+host,'PANEL_EXTRA_HOSTS='+alias])
         write(ROOT/'panel.env','\n'.join(lines)+'\n')
         if request['use_for_vpn']:
             conf = load_config()

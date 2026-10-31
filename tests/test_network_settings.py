@@ -111,3 +111,12 @@ class NetworkSettingsTests(unittest.TestCase):
         self.caddy.write_text('old.example.com {\n tls internal\n reverse_proxy 127.0.0.1:8000\n}')
         n.bootstrap()
         self.assertTrue((self.root/'caddy-owned').exists())
+
+    def test_resaving_same_domain_keeps_existing_https_alias(self):
+        n.queue(dict(operation='ssl-save',domain='new.example.com',use_for_vpn=True))
+        n.apply_pending()
+        n.queue(dict(operation='ssl-save',domain='new.example.com',use_for_vpn=False))
+        n.apply_pending()
+        self.assertIn('PANEL_EXTRA_HOSTS=old.example.com',(self.root/'panel.env').read_text())
+        self.assertIn('old.example.com, new.example.com',self.caddy.read_text())
+        self.assertEqual(n.load_config()['endpoint'],'new.example.com')
