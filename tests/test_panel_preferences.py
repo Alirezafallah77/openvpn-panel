@@ -100,6 +100,13 @@ class PanelPreferencesTests(unittest.TestCase):
         for changes in ({'confirm':'0'},{'public_port':'8000'},{'public_port':'443\n'},{'admin_path':'/s'},{'admin_path':'/x/y'}):
             self.assertEqual(self.client.post('/secret-panel/settings/panel',data=data|changes).status_code,400)
 
+    def test_ssl_pending_address_keeps_current_port_and_admin_path(self):
+        self.login()
+        with patch('app.maintenance_request',return_value={'queued':True,'public_port':5000}):
+            response=self.client.post('/secret-panel/settings/ssl',data=dict(csrf=self.csrf(),password='testing-password',confirm='1',domain='new.example.com'))
+        self.assertEqual(response.status_code,200)
+        self.assertIn('https://new.example.com:5000/secret-panel',response.text)
+
     def test_calendar_known_boundaries_and_unchanged_storage(self):
         self.assertEqual(parse_date('1403-01-01','jalali').isoformat(),'2024-03-20')
         self.assertEqual(parse_date('۱۴۰۳-۱۲-۳۰','jalali').isoformat(),'2025-03-20')

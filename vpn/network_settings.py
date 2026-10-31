@@ -229,7 +229,9 @@ def queue(message):
             atomic_json(ROOT/'settings-state.json',dict(status='failed',error='queue_failed',updated_at=int(time.time())))
             (ROOT/'settings-pending.json').unlink(missing_ok=True)
             raise
-    return dict(queued=True, job_id=job_id, domain=request.get('domain',''))
+    return dict(queued=True, job_id=job_id, domain=request.get('domain',''),
+                public_port=public_port(environment().get('PANEL_PUBLIC_PORT','443')),
+                admin_path=admin_path(environment().get('PANEL_ADMIN_PATH','')))
 
 
 def snapshot():

@@ -395,9 +395,11 @@ def create_app(config=None):
             host = domain(request.form.get('domain',''))
         except ValueError:
             abort(400, description='دامنهٔ معتبر بدون https، مسیر یا پورت وارد کنید.')
-        privileged(dict(operation='ssl-save',domain=host,use_for_vpn=request.form.get('use_for_vpn')=='1'))
+        queued=privileged(dict(operation='ssl-save',domain=host,use_for_vpn=request.form.get('use_for_vpn')=='1'))
         app.logger.info('Admin queued SSL settings change')
-        return render_template('network_pending.html', target='https://'+host)
+        port=public_port(queued.get('public_port',443))
+        target='https://'+host+(':'+str(port) if port!=443 else '')+app.config['ADMIN_PATH']
+        return render_template('network_pending.html', target=target)
 
     @app.post('/settings/vpn')
     @admin

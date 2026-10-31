@@ -34,8 +34,8 @@ for dir in vpn templates static locales; do
   cp -r "$SOURCE/$dir/." "/opt/openvpn-panel/$dir/"
 done
 chown -R root:root /opt/openvpn-panel
-find /opt/openvpn-panel/vpn /opt/openvpn-panel/templates /opt/openvpn-panel/static -type d -exec chmod 0755 {} +
-find /opt/openvpn-panel/vpn /opt/openvpn-panel/templates /opt/openvpn-panel/static -type f -exec chmod 0644 {} +
+find /opt/openvpn-panel/vpn /opt/openvpn-panel/templates /opt/openvpn-panel/static /opt/openvpn-panel/locales -type d -exec chmod 0755 {} +
+find /opt/openvpn-panel/vpn /opt/openvpn-panel/templates /opt/openvpn-panel/static /opt/openvpn-panel/locales -type f -exec chmod 0644 {} +
 install -d -o root -g openvpn-panel -m 0710 /var/lib/openvpn-panel-backups /var/lib/openvpn-panel-status
 install -m 0755 "$SOURCE/scripts/panelctl.py" /usr/local/sbin/openvpn-panelctl
 install -m 0644 "$SOURCE"/deploy/*.service "$SOURCE"/deploy/*.timer /etc/systemd/system/
