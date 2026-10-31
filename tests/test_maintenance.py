@@ -69,7 +69,7 @@ class MaintenanceTests(unittest.TestCase):
         with patch.object(m.subprocess, 'run') as run:
             self.assertEqual(m.control_web('stop'), {'scheduled':True})
             arguments = run.call_args.args[0]
-            self.assertEqual(arguments[-3:], ['/usr/bin/systemctl','stop','openvpn-panel.service'])
+            self.assertEqual(arguments[-2:], ['/usr/local/sbin/openvpn-panelctl','web-stop'])
         with self.assertRaises(ValueError): m.control_web('restart; id')
 
     def test_telegram_transport_only_accepts_encrypted_documents(self):

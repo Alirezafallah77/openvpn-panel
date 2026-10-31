@@ -38,6 +38,7 @@ def restart():
     # Explicit ordering avoids a collector EOF racing a new server process.
     systemctl('stop', 'openvpn-server@panel.service')
     systemctl('stop', 'openvpn-panel-accounting.service')
+    systemctl('reset-failed', 'openvpn-panel.service', 'openvpn-panel-pki.service', 'openvpn-panel-accounting.service', 'openvpn-server@panel.service')
     systemctl('start', 'openvpn-server@panel.service')
     wait_accounting()
     systemctl('restart', 'openvpn-panel.service', 'openvpn-panel-pki.service')
@@ -104,6 +105,7 @@ def restore(source, password_file=None, yes=False):
             systemctl('stop', 'openvpn-panel-backup.timer', 'openvpn-panel-backup.service')
             systemctl('stop', 'openvpn-server@panel', 'openvpn-panel-accounting', 'openvpn-panel', 'openvpn-panel-pki')
             def activate():
+                systemctl('reset-failed', 'openvpn-panel.service', 'openvpn-panel-pki.service', 'openvpn-panel-accounting.service', 'openvpn-server@panel.service')
                 systemctl('start', 'openvpn-panel-pki', 'openvpn-panel')
                 systemctl('start', 'openvpn-server@panel')
                 wait_accounting()
@@ -147,7 +149,10 @@ def main():
     elif args.action == 'password':
         password()
     elif args.action.startswith('web-'):
-        systemctl(args.action.split('-')[1], 'openvpn-panel.service')
+        action = args.action.split('-')[1]
+        if action in ('start', 'restart'):
+            systemctl('reset-failed', 'openvpn-panel.service')
+        systemctl(action, 'openvpn-panel.service')
     elif not args.destination:
         parser.error('backup requires an output path (must not already exist)')
     elif args.action == 'restore':
