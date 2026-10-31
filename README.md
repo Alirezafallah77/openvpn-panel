@@ -1,10 +1,28 @@
-# OpenVPN Panel • نسخهٔ آزمایشی 0.1
+# OpenVPN Panel • نسخهٔ آزمایشی 0.2
 
 پنل فارسی و راست‌به‌چپ برای **نصب جدید OpenVPN روی Ubuntu 24.04**.
 
 ساخت کاربر، فایل اتصال `.ovpn`، سهمیهٔ مجموع ارسال و دریافت، اعتبار از اولین پذیرش اتصال، نمایش مصرف و روزهای باقی‌مانده، لینک محرمانهٔ وضعیت، فعال/غیرفعال‌سازی، و قطع اتصال پس از اتمام سهمیه.
 
 > این اولین نسخهٔ آزمایشی است، نه محصول ممیزی‌شده. ابتدا روی VPS تازه و غیرعملیاتی امتحان کنید. نتیجهٔ آزمون خودکار نصب و اتصال واقعی را در [GitHub Actions](https://github.com/Alirezafallah77/openvpn-panel/actions) بررسی کنید. آزمون روی یک VPS واقعی شما، دامنه، فایروال شرکت میزبان و کلاینت‌های موبایل جداگانه لازم است.
+
+## امکانات جدید 0.2
+
+- داشبورد CPU/RAM/Swap/Disk، تعداد کل/غیرفعال/منقضی/آنلاین و ترافیک کل؛ جست‌وجوی نام کاربران.
+- صفحهٔ **بکاپ، انتقال سرور و تلگرام**: بکاپ دستی رمزگذاری‌شده، دانلود و ارسال دوره‌ای به ربات تلگرام، مثلاً هر ۱۵ دقیقه.
+- بازیابی کاربران، مصرف، زمان شروع، توکن‌ها و کلیدهای VPN با یک دستور روی سرور جدید؛ IP/دامنه و رمز مدیر سرور جدید حفظ می‌شوند.
+- توقف/ری‌استارت فقط پنل وب با تأیید رمز مدیر؛ VPN و بکاپ دوره‌ای متوقف نمی‌شوند.
+
+### ارتقای نصب قبلی، بدون حذف کاربران
+
+در checkout همین شاخه، به‌جای اجرای دوبارهٔ نصب‌کننده:
+
+```bash
+git pull --ff-only origin arena/c09c103f-openvpn-panel
+sudo bash scripts/upgrade.sh
+```
+
+اسکریپت پیش از تغییر، بکاپ خصوصی و نسخهٔ کد قدیمی می‌گیرد؛ ارتقا قطع کوتاه VPN دارد. backupهای پیش از ارتقا در `/var/backups/openvpn-panel` خام و محرمانه‌اند؛ آن‌ها را رمزگذاری و امن نگهداری کنید. راهنمای انتقال و محدودیت‌ها در [عملیات](docs/OPERATIONS.md).
 
 ## ساده‌ترین نصب
 
@@ -68,10 +86,12 @@ sudo bash scripts/install.sh --endpoint YOUR_SERVER_IP --domain panel.example.co
 sudo openvpn-panelctl status
 sudo openvpn-panelctl restart
 sudo openvpn-panelctl password
-sudo openvpn-panelctl backup /root/openvpn-panel-backup.tar.gz
+sudo openvpn-panelctl backup /root/openvpn-panel-backup.ovpnbak --encrypt
+sudo openvpn-panelctl restore /root/openvpn-panel-backup.ovpnbak
+sudo openvpn-panelctl web-start
 ```
 
-رمز جدید، نشست‌های مدیریت قبلی را هم باطل می‌کند. پشتیبان حاوی **کلید CA، کلید خصوصی کاربران و اطلاعات محرمانه** است؛ آن را رمزگذاری و خارج از سرور نگهداری کنید. بازگردانی و رفع نصب نیمه‌تمام در [راهنمای عملیات](docs/OPERATIONS.md) توضیح داده شده است.
+رمز جدید، نشست‌های مدیریت قبلی را هم باطل می‌کند. بکاپ وب و تلگرام همیشه رمزگذاری‌شده است؛ برای CLI گزینهٔ `--encrypt` را استفاده کنید. بازیابی از SSH انجام می‌شود و کاربران/کلیدهای فعلی مقصد را جایگزین می‌کند. پشتیبان حاوی **کلید CA، کلید خصوصی کاربران و اطلاعات محرمانه** است؛ آن را رمزگذاری و خارج از سرور نگهداری کنید. بازگردانی و رفع نصب نیمه‌تمام در [راهنمای عملیات](docs/OPERATIONS.md) توضیح داده شده است.
 
 ```bash
 sudo journalctl -u openvpn-panel -u openvpn-panel-pki -u openvpn-panel-accounting -u openvpn-server@panel -n 100 --no-pager
@@ -81,7 +101,7 @@ sudo journalctl -u openvpn-panel -u openvpn-panel-pki -u openvpn-panel-accountin
 
 ## معماری و امنیت
 
-- وب با کاربر غیر root، کد root-owned و filesystem فقط‌خواندنی اجرا می‌شود؛ بدون `sudo` و بدون دسترسی به CA. سرویس مجزای PKI درخواست‌ها را از سوکت Unix با بررسی UID و نام معتبر می‌پذیرد.
+- وب با کاربر غیر root، کد root-owned و filesystem فقط‌خواندنی اجرا می‌شود؛ بدون `sudo` و بدون دسترسی به CA. سرویس مجزای PKI/نگهداری درخواست‌ها را از سوکت Unix با بررسی UID و نام معتبر می‌پذیرد؛ عملیات مجاز از فهرست ثابت هستند. دسترسی شبکهٔ این سرویس برای ارسال دستی تلگرام لازم است.
 - OpenVPN و حسابداری در این نسخه root هستند و با تنظیمات systemd محدود می‌شوند؛ compromise ریشهٔ سرور یا مدیر پنل همچنان خطر جدی است. CA آنلاین و بدون passphrase برای صدور خودکار نگهداری می‌شود.
 - گواهی متقابل TLS، `tls-crypt`، حداقل TLS 1.2، رمزهای AEAD، عدم compression و CRL؛ کاربران ناشناخته/غیرمجاز توسط hook پذیرش رد می‌شوند.
 - رمز مدیر scrypt، نشست یک‌ساعته، CSRF، Secure cookie در حالت HTTPS، HttpOnly و SameSite، CSP، no-store و no-referrer؛ توکن وضعیت به‌صورت هش SHA-256 ذخیره می‌شود.

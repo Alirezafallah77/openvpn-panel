@@ -71,3 +71,24 @@ class MaintenanceTests(unittest.TestCase):
             arguments = run.call_args.args[0]
             self.assertEqual(arguments[-3:], ['/usr/bin/systemctl','stop','openvpn-panel.service'])
         with self.assertRaises(ValueError): m.control_web('restart; id')
+
+    def test_telegram_transport_only_accepts_encrypted_documents(self):
+        path = self.directory/'backup-20261031T000000Z-abcdef12.ovpnbak'
+        path.write_bytes(b'plain private archive')
+        with self.assertRaises(ValueError):
+            m.send_telegram(self.message['token'],self.message['chat_id'],path)
+        path.write_bytes(m.backups.encrypt(b'test archive', self.message['passphrase']))
+        from unittest.mock import MagicMock
+        response = MagicMock()
+        response.read.return_value = b'{"ok":true}'
+        opener = MagicMock()
+        opener.open.return_value.__enter__.return_value = response
+        with patch.object(m.urllib.request, 'build_opener', return_value=opener):
+            m.send_telegram(self.message['token'],self.message['chat_id'],path)
+        request = opener.open.call_args.args[0]
+        self.assertTrue(request.full_url.startswith('https://api.telegram.org/bot'))
+        self.assertIn(m.backups.MAGIC, request.data)
+        self.assertIn(b'multipart/form-data', request.headers['Content-type'].encode())
+        response.read.return_value = b'{"ok":false}'
+        with patch.object(m.urllib.request, 'build_opener', return_value=opener), self.assertRaises(ValueError):
+            m.send_telegram(self.message['token'],self.message['chat_id'],path)

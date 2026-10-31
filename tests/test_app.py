@@ -146,7 +146,7 @@ class WebTests(unittest.TestCase):
             self.assertIn(b'name="token"', response.data)
             self.assertEqual(self.post('/backups/settings', dict(password='wrong',interval='15')).status_code, 403)
             self.assertEqual(self.post('/backups/settings', dict(password='test-password-123',interval='0')).status_code, 400)
-            self.assertEqual(self.post('/backups/settings', dict(password='test-password-123',interval='15',passphrase='a'*16)).status_code, 302)
+            self.assertEqual(self.post('/backups/settings', dict(password='test-password-123',interval='15',passphrase='a'*16,passphrase_repeat='a'*16)).status_code, 302)
             self.assertEqual(self.post('/backups/create').status_code, 302)
         self.app.config['BACKUP_DIRECTORY'] = self.temp.name
         name = 'backup-20261031T000000Z-abcdef12.ovpnbak'

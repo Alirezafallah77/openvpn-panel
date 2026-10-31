@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        mode: [ssh, https]
+        mode: [ssh, https, upgrade]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Enable TUN and install a fresh instance
@@ -26,7 +26,42 @@ jobs:
           set -o pipefail
           ARGS=()
           if [[ '${{ matrix.mode }}' == https ]]; then ARGS+=(--domain panel.example.invalid); fi
-          sudo bash scripts/install.sh --endpoint 192.0.2.1 --password-file /root/panel-test-password "${ARGS[@]}" 2>&1 | tee /tmp/panel-install.log
+          INSTALLER=scripts/install.sh
+          if [[ '${{ matrix.mode }}' == upgrade ]]; then
+            git fetch --depth=1 origin e7557018bba2c7f9cfecd02c3061d3bf1e4f1be5
+            mkdir /tmp/legacy-panel
+            git archive FETCH_HEAD | tar -x -C /tmp/legacy-panel
+            INSTALLER=/tmp/legacy-panel/scripts/install.sh
+          fi
+          sudo bash "$INSTALLER" --endpoint 192.0.2.1 --password-file /root/panel-test-password "${ARGS[@]}" 2>&1 | tee /tmp/panel-install.log
+      - name: Upgrade actual v0.1 data and verify CA/users survive
+        if: matrix.mode == 'upgrade'
+        run: |
+          BEFORE=$(sudo sha256sum /etc/openvpn-panel/pki/ca.key)
+          sudo /opt/openvpn-panel/.venv/bin/python - <<'PYCODE'
+          import sys
+          sys.path.insert(0,'/opt/openvpn-panel')
+          from quota import Quotas
+          q=Quotas('/var/lib/openvpn-panel/quota.sqlite')
+          q.create_user('upgrade-check',10000,30)
+          q.connect('upgrade-check','legacy-session',now=100)
+          q.account('legacy-session',100,200,now=101)
+          q.set_enabled('upgrade-check',False)
+          PYCODE
+          sudo bash scripts/upgrade.sh
+          AFTER=$(sudo sha256sum /etc/openvpn-panel/pki/ca.key)
+          test "$BEFORE" = "$AFTER"
+          sudo /opt/openvpn-panel/.venv/bin/python - <<'PYCODE'
+          import sys
+          sys.path.insert(0,'/opt/openvpn-panel')
+          from quota import Quotas
+          q=Quotas('/var/lib/openvpn-panel/quota.sqlite')
+          u=q.status('upgrade-check')
+          assert (u.used_bytes,u.first_connected,u.days,u.enabled)==(300,100,30,False)
+          with q._db() as db:
+              db.execute('DELETE FROM sessions')
+              db.execute("DELETE FROM users WHERE name='upgrade-check'")
+          PYCODE
       - name: Refuse reinstall without overwriting CA
         run: |
           BEFORE=$(sudo sha256sum /etc/openvpn-panel/pki/ca.key)

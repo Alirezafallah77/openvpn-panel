@@ -7,6 +7,7 @@
 <label>توکن ربات تلگرام {% if settings.token_configured %}(ذخیره شده؛ خالی بگذارید تا حفظ شود){% endif %}<input type="password" name="token" autocomplete="new-password" maxlength="128"></label>
 <label>Chat ID مقصد<input name="chat_id" value="{{ settings.chat_id }}" maxlength="65" dir="ltr" placeholder="-1001234567890"></label>
 <label>رمز رمزگذاری بکاپ (حداقل ۱۶ کاراکتر) {% if settings.encryption_configured %}(ذخیره شده؛ خالی بگذارید تا حفظ شود){% endif %}<input type="password" name="passphrase" autocomplete="new-password" minlength="16" maxlength="1024"></label>
+<label>تکرار رمز جدید بکاپ (در صورت تغییر)<input type="password" name="passphrase_repeat" autocomplete="new-password" maxlength="1024"></label>
 <label>رمز فعلی مدیر برای تأیید تغییرات<input type="password" name="password" autocomplete="current-password" required></label><button>ذخیرهٔ تنظیمات</button></form>
 <p>ابتدا به ربات در تلگرام پیام /start بدهید؛ Chat ID عددی حساب/گروه مقصد را وارد کنید. در گروه/کانال، ربات باید مجوز ارسال سند داشته باشد. توکن و رمز بکاپ دوباره نمایش داده نمی‌شوند. برای بکاپ دستی بدون تلگرام، فقط رمز بکاپ را تنظیم و گزینهٔ ارسال دوره‌ای را خاموش نگه دارید.</p>
 <p>بررسی برنامه هر دقیقه انجام می‌شود؛ مثلاً فاصلهٔ ۱۵ دقیقه با دقت حدود یک دقیقه به‌علاوهٔ زمان اجرای کار است. ارسال موفق وابسته به دسترسی سرور به api.telegram.org است. حداکثر فایل رمزگذاری‌شده ۴۵ MiB و نگهداری محلی ۲۰ فایل اخیر است؛ فایل‌های تلگرام خودکار حذف نمی‌شوند.</p></section>

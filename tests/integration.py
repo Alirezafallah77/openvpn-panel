@@ -147,7 +147,7 @@ def main():
         # Web-managed encryption; no real Telegram token or public bot required.
         migration_password = 'migration-test-passphrase-123'
         post('/backups/settings', dict(password=PASSWORD, interval='15', enabled='0',
-                                      passphrase=migration_password, token='', chat_id=''))
+                                      passphrase=migration_password, passphrase_repeat=migration_password, token='', chat_id=''))
         post('/backups/create', {})
         backup_page = opener.open(BASE + '/backups').read().decode()
         backup_name = re.search(r'backup-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\.ovpnbak', backup_page).group(0)

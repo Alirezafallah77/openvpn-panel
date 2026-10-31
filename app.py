@@ -221,6 +221,8 @@ def create_app(config=None):
         token = request.form.get('token', '').strip()
         chat_id = request.form.get('chat_id', '').strip()
         phrase = request.form.get('passphrase', '')
+        if phrase and phrase != request.form.get('passphrase_repeat', ''):
+            abort(400, description='تکرار رمز بکاپ یکسان نیست.')
         if ((token and not re.fullmatch(r'[0-9]{5,20}:[A-Za-z0-9_-]{20,100}', token)) or
                 (chat_id and not re.fullmatch(r'-?[0-9]{1,20}|@[A-Za-z0-9_]{5,64}', chat_id)) or
                 (phrase and not 16 <= len(phrase) <= 1024)):
