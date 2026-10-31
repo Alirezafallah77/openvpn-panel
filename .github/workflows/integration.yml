@@ -5,6 +5,7 @@ on:
   workflow_dispatch:
 permissions:
   contents: read
+  checks: write
 jobs:
   vpn:
     runs-on: ubuntu-24.04
@@ -16,12 +17,34 @@ jobs:
           sudo modprobe tun
           echo 'integration-only-password-123' | sudo tee /root/panel-test-password >/dev/null
           sudo chmod 600 /root/panel-test-password
-          sudo bash scripts/install.sh --endpoint 192.0.2.1 --password-file /root/panel-test-password
+          set -o pipefail
+          sudo bash scripts/install.sh --endpoint 192.0.2.1 --password-file /root/panel-test-password 2>&1 | tee /tmp/panel-install.log
       - name: Test real VPN and quota enforcement
-        run: sudo /opt/openvpn-panel/.venv/bin/python tests/integration.py
+        run: |
+          set -o pipefail
+          sudo /opt/openvpn-panel/.venv/bin/python tests/integration.py 2>&1 | tee /tmp/panel-e2e.log
       - name: Diagnostics (no profiles, tokens or keys)
         if: failure()
         run: |
           sudo systemctl status openvpn-panel openvpn-panel-accounting openvpn-server@panel --no-pager || true
           sudo journalctl -u openvpn-panel -u openvpn-panel-accounting -u openvpn-server@panel --no-pager -n 150
           sudo tail -n 80 /tmp/e2e-client.log || true
+      - name: Publish sanitized test diagnostics as a check
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sudo journalctl -u openvpn-panel -u openvpn-panel-accounting -u openvpn-server@panel --no-pager -n 100 > /tmp/panel-services.log
+          sudo chmod a+r /tmp/e2e-client.log 2>/dev/null || true
+          python3 - <<'PYCODE'
+          import json, os, pathlib, subprocess
+          sections = []
+          for filename in ('/tmp/panel-install.log', '/tmp/panel-e2e.log', '/tmp/panel-services.log', '/tmp/e2e-client.log'):
+              path = pathlib.Path(filename)
+              if path.exists():
+                  sections.append('### ' + path.name + '\n```text\n' + path.read_text(errors='replace')[-10000:] + '\n```')
+          data = dict(name='VPN integration diagnostics', head_sha=os.environ['GITHUB_SHA'],
+                      status='completed', conclusion='neutral',
+                      output=dict(title='Ephemeral runner diagnostics', summary='\n'.join(sections)[-60000:]))
+          subprocess.run(['gh','api','--method','POST','repos/' + os.environ['GITHUB_REPOSITORY'] + '/check-runs', '--input','-'], input=json.dumps(data), text=True, check=True, stdout=subprocess.DEVNULL)
+          PYCODE

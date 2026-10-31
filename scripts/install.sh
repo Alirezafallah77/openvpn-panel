@@ -76,6 +76,7 @@ find /opt/openvpn-panel -type d -exec chmod 0755 {} +
 find /opt/openvpn-panel -type f -exec chmod 0644 {} +
 python3 -m venv /opt/openvpn-panel/.venv
 /opt/openvpn-panel/.venv/bin/pip install -r /opt/openvpn-panel/requirements.txt
+chmod -R a+rX /opt/openvpn-panel/.venv
 install -d -o openvpn-panel -g openvpn-panel -m 0770 /var/lib/openvpn-panel
 install -d -m 0755 /etc/openvpn/server
 /opt/openvpn-panel/.venv/bin/python "$SOURCE/scripts/configure.py" "$ENDPOINT" "$DOMAIN" "$INTERFACE" "$PASSWORD_FILE"
