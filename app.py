@@ -204,9 +204,13 @@ def create_app(config=None):
         except (OSError, ValueError):
             abort(503, description='سرویس نگهداری در دسترس نیست یا تنظیمات معتبر نیست.')
 
+    @app.errorhandler(403)
+    def forbidden(error):
+        return render_template('message.html', error=error.description), 403
+
     def confirm_password():
         if not check_password_hash(app.config['ADMIN_PASSWORD_HASH'], request.form.get('password', '')):
-            abort(403)
+            abort(403, description='رمز تأیید صحیح نیست. رمز فعلی ورود مدیر پنل را وارد کنید؛ نه رمز SSH/root، رمز Cloudflare یا رمز بکاپ. درخواست تغییر تنظیمات اجرا نشده است.')
 
     @app.get('/settings/network')
     @admin

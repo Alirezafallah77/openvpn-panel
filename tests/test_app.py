@@ -240,3 +240,15 @@ class WebTests(unittest.TestCase):
         self.q.update_limits('alice',1024,3650)
         self.q.account('old',1024,0)
         self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf)).status_code,403)
+
+
+    def test_ssl_bad_confirmation_password_is_explained_before_dns_or_broker(self):
+        self.login()
+        self.app.config['VPN_CONFIGURED']=True
+        with patch('app.maintenance_request') as broker:
+            result=self.post('/settings/ssl',dict(password='wrong-root-password',domain='myself-backup.ir',confirm='1',use_for_vpn='1'))
+            self.assertEqual(result.status_code,403)
+            self.assertIn('رمز فعلی ورود مدیر پنل'.encode(),result.data)
+            self.assertIn('درخواست تغییر تنظیمات اجرا نشده است'.encode(),result.data)
+            self.assertNotIn(b'wrong-root-password',result.data)
+            broker.assert_not_called()
