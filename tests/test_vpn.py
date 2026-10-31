@@ -1,11 +1,12 @@
 import os
 from pathlib import Path
 import tempfile
+import socket
 import time
 import unittest
 from unittest.mock import Mock, patch
 from quota import Quotas
-from vpn.collector import parse_status, enforce, Management
+from vpn.collector import parse_status, enforce, Management, notify
 from vpn.hook import run, address
 
 STATUS = '''TITLE\tOpenVPN 2.6
@@ -109,3 +110,12 @@ class VPNTests(unittest.TestCase):
 
     def test_ipv6_address_matches_management(self):
         self.assertEqual(address(dict(trusted_ip6='2001:db8::1', trusted_port='1234')), '[2001:db8::1]:1234')
+
+    def test_systemd_watchdog_notification(self):
+        path = str(Path(self.temp.name) / 'notify.sock')
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as receiver:
+            receiver.bind(path)
+            receiver.settimeout(1)
+            with patch.dict(os.environ, {'NOTIFY_SOCKET': path}):
+                notify('READY=1\nWATCHDOG=1')
+            self.assertEqual(receiver.recv(1024), b'READY=1\nWATCHDOG=1')

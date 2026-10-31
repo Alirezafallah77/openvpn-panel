@@ -148,6 +148,11 @@ def main():
         cmd('systemctl', 'kill', '--signal=SIGKILL', 'openvpn-panel-accounting.service')
         wait_for(lambda: subprocess.run(['systemctl', 'is-active', '--quiet', 'openvpn-server@panel.service']).returncode != 0,
                  'accounting failure stops OpenVPN (fail closed)')
+        cmd('/usr/local/sbin/openvpn-panelctl', 'restart')
+        time.sleep(3)
+        cmd('systemctl', 'kill', '--signal=SIGSTOP', 'openvpn-panel-accounting.service')
+        wait_for(lambda: subprocess.run(['systemctl', 'is-active', '--quiet', 'openvpn-server@panel.service']).returncode != 0,
+                 'stalled accounting watchdog stops OpenVPN', timeout=35)
     finally:
         if client.poll() is None:
             client.terminate()

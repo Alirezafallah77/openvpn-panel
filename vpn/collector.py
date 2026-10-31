@@ -94,14 +94,28 @@ def enforce(quotas, management):
             management.kill(name)
 
 
+def notify(message):
+    """Minimal sd_notify; watchdog also catches an alive but stalled collector."""
+    destination = os.environ.get('NOTIFY_SOCKET')
+    if not destination:
+        return
+    if destination.startswith('@'):
+        destination = '\0' + destination[1:]
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as channel:
+        channel.sendto(message.encode('ascii'), destination)
+
+
 def main():
     os.umask(0o007)
     quotas = Quotas('/var/lib/openvpn-panel/quota.sqlite')
+    # READY must precede OpenVPN startup, otherwise dependency ordering deadlocks.
+    notify('READY=1\nWATCHDOG=1')
     # On startup allow OpenVPN time to create its socket. No admission before heartbeat.
     started = time.monotonic()
     while not Path(SOCKET).exists():
         if time.monotonic() - started > 45:
             raise TimeoutError('OpenVPN management socket not available')
+        notify('WATCHDOG=1')
         time.sleep(0.2)
     management = Management()
     try:
@@ -116,6 +130,7 @@ def main():
                     if marker.name[7:] not in live:
                         marker.unlink(missing_ok=True)
             Path(HEARTBEAT).touch(mode=0o600)
+            notify('WATCHDOG=1')
             time.sleep(2)
     finally:
         management.close()

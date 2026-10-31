@@ -3,7 +3,11 @@ Description=OpenVPN live quota enforcement
 Before=openvpn-server@panel.service
 
 [Service]
-Type=simple
+Type=notify
+NotifyAccess=main
+WatchdogSec=15
+WatchdogSignal=SIGKILL
+TimeoutStartSec=60
 User=root
 Group=openvpn-panel
 WorkingDirectory=/opt/openvpn-panel

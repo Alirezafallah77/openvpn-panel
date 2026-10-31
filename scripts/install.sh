@@ -24,8 +24,8 @@ done
 [[ $EUID == 0 ]] || { echo 'Run with sudo.' >&2; exit 1; }
 source /etc/os-release
 [[ $ID == ubuntu && $VERSION_ID == 24.04 ]] || { echo 'Only Ubuntu 24.04 is supported.' >&2; exit 1; }
-[[ $ENDPOINT =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ && ${#ENDPOINT} -le 253 ]] || { usage; exit 2; }
-[[ -z $DOMAIN || ( $DOMAIN =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ && ${#DOMAIN} -le 253 ) ]] || { echo 'Invalid domain.' >&2; exit 2; }
+[[ $ENDPOINT =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ && ${#ENDPOINT} -le 253 ]] || { usage; exit 2; }
+[[ -z $DOMAIN || ( $DOMAIN =~ ^[A-Za-z0-9]([A-Za-z0-9.-]*[A-Za-z0-9])?$ && ${#DOMAIN} -le 253 ) ]] || { echo 'Invalid domain.' >&2; exit 2; }
 [[ -c /dev/net/tun ]] || { echo 'TUN is unavailable. Enable it with your VPS provider.' >&2; exit 1; }
 [[ ! -e /opt/openvpn-panel && ! -e /etc/openvpn-panel && ! -e /var/lib/openvpn-panel ]] || {
   echo 'Existing or incomplete installation detected; refusing to overwrite keys/data. See docs/OPERATIONS.md.' >&2; exit 1;
@@ -97,7 +97,12 @@ if [[ -n $DOMAIN ]]; then
   systemctl restart caddy
 fi
 sleep 3
-systemctl is-active --quiet openvpn-panel-accounting.service openvpn-server@panel.service openvpn-panel.service openvpn-panel-pki.service
+for SERVICE in openvpn-panel-accounting.service openvpn-server@panel.service openvpn-panel.service openvpn-panel-pki.service; do
+  systemctl is-active --quiet "$SERVICE"
+done
+[[ -S /run/openvpn-panel-pki/broker.sock && -f /run/openvpn-panel/heartbeat ]] || {
+  echo 'Required broker/heartbeat not ready; inspect systemd journals.' >&2; exit 1
+}
 printf '\nInstalled. Allow UDP 1194 in your provider firewall.\n'
 if [[ -n $DOMAIN ]]; then
   printf 'Panel: https://%s (DNS must point here; allow TCP 80/443 for HTTPS).\n' "$DOMAIN"

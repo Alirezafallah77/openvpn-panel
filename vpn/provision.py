@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 ROOT = Path('/etc/openvpn-panel')
+REVOCATIONS = Path('/var/lib/openvpn-panel-revocations')
 
 
 def command(*args):
@@ -47,7 +48,7 @@ def profile(name, action='download', root=ROOT):
             command('openssl', 'ca', '-batch', '-config', config, '-gencrl', '-out', str(tmp))
             tmp.chmod(0o644)
             tmp.replace(root / 'crl.pem')
-            pending = Path('/var/lib/openvpn-panel-revocations') / ('revoke-' + name)
+            pending = REVOCATIONS / ('revoke-' + name)
             pending.touch(mode=0o600)
             cert.unlink(missing_ok=True)
             key.unlink(missing_ok=True)

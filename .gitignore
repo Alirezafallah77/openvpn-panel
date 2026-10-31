@@ -10,3 +10,7 @@ __pycache__/
 
 .venv/
 instance/
+
+*.log
+*.tar.gz
+.env.*
