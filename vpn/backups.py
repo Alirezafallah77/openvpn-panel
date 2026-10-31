@@ -49,9 +49,18 @@ def decrypt(data, password):
         raise ValueError('Wrong passphrase or corrupted backup') from None
 
 
+class BoundedBuffer(io.BytesIO):
+    def write(self, data):
+        if self.tell() + len(data) > MAX_ARCHIVE - 128:
+            raise ValueError('Compressed backup too large')
+        return super().write(data)
+
+
 def capture(root=ROOT, database=DATABASE):
     """Caller holds the PKI lock. SQLite backup is transactionally consistent."""
-    buffer = io.BytesIO()
+    if database.stat().st_size > MAX_EXPANDED:
+        raise ValueError('Database exceeds migration size limit')
+    buffer = BoundedBuffer()
     with tempfile.TemporaryDirectory(prefix='panel-snapshot-') as temp:
         snapshot = Path(temp) / 'quota.sqlite'
         with sqlite3.connect(f'file:{database}?mode=ro', uri=True) as source:
@@ -60,6 +69,8 @@ def capture(root=ROOT, database=DATABASE):
                 if dest.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
                     raise ValueError('Database integrity failed')
         total = snapshot.stat().st_size
+        if total > MAX_EXPANDED:
+            raise ValueError('Database snapshot too large')
         with tarfile.open(fileobj=buffer, mode='w:gz') as archive:
             manifest = json.dumps({'format': 2, 'created_at': int(time.time())}).encode()
             info = tarfile.TarInfo('manifest.json')

@@ -31,7 +31,7 @@ def create_app(config=None):
         VPN_CONFIGURED=os.environ.get('PANEL_VPN_CONFIGURED') == '1',
         BACKUP_DIRECTORY='/var/lib/openvpn-panel-backups',
         ONLINE_SNAPSHOT='/var/lib/openvpn-panel-status/online.json',
-        MAX_CONTENT_LENGTH=8192, TRUSTED_HOSTS=['localhost', '127.0.0.1'],
+        MAX_CONTENT_LENGTH=32768, TRUSTED_HOSTS=['localhost', '127.0.0.1'],
     )
     if os.environ.get('PANEL_HOST'):
         app.config['TRUSTED_HOSTS'] = [os.environ['PANEL_HOST']]

@@ -137,3 +137,17 @@ default_crl_days=365
         with tarfile.open(fileobj=io.BytesIO(self.archive), mode='r:gz') as archive:
             self.assertNotIn('etc/openvpn-panel/panel.env', archive.getnames())
         self.stage()
+
+    def test_compressed_output_bound_enforced_during_write(self):
+        from unittest.mock import patch
+        with patch.object(backups, 'MAX_ARCHIVE', 512):
+            buffer = backups.BoundedBuffer()
+            buffer.write(b'a'*100)
+            with self.assertRaises(ValueError):
+                buffer.write(b'b'*300)
+
+    def test_invalid_certificate_rejected_before_apply(self):
+        (self.root/'pki/server.key').write_text('not a private key')
+        data = backups.capture(self.root, self.db)
+        with self.assertRaises(subprocess.CalledProcessError):
+            self.stage(data)

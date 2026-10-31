@@ -54,3 +54,10 @@ class BrokerTests(unittest.TestCase):
                 profile(name)
         with self.assertRaises(ValueError):
             profile('alice', 'shell')
+
+    def test_maintenance_protocol_is_uid_authenticated(self):
+        from vpn.client import maintenance_request
+        with patch('vpn.broker.dispatch', return_value={'enabled':False}) as dispatch:
+            result = maintenance_request(dict(operation='backup-settings-get'), self.path)
+            self.assertEqual(result, {'enabled':False})
+            dispatch.assert_called_once_with(dict(operation='backup-settings-get'))
