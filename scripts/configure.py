@@ -136,9 +136,6 @@ push "block-ipv6"
 verb 3
 ''')
     write('/usr/local/sbin/openvpn-panel-hook', '#!/bin/sh\nexec /opt/openvpn-panel/.venv/bin/python -Es /opt/openvpn-panel/hook_entry.py "$@"\n', 0o755)
-    write('/usr/local/sbin/openvpn-panel-profile', '#!/bin/sh\nexec /opt/openvpn-panel/.venv/bin/python -I /opt/openvpn-panel/vpn/provision.py "$@"\n', 0o755)
-    write('/etc/sudoers.d/openvpn-panel', 'Defaults:openvpn-panel !requiretty\nopenvpn-panel ALL=(root) NOPASSWD: /usr/local/sbin/openvpn-panel-profile *\n', 0o440)
-    cmd('visudo', '-cf', '/etc/sudoers.d/openvpn-panel')
     # Independent chains; no flush of host firewall and no INPUT/SSH policy changes.
     write('/usr/local/sbin/openvpn-panel-network', f'''#!/bin/bash
 set -euo pipefail

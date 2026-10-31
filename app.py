@@ -1,10 +1,11 @@
-"""Unprivileged web UI. VPN control is confined to root-owned helper/services."""
+"""Unprivileged web UI. VPN control is confined to root-owned broker/services."""
 import hmac
 import os
 import re
 import secrets
 import sqlite3
-import subprocess
+import json
+import socket
 import time
 from datetime import timedelta
 from functools import wraps
@@ -168,13 +169,21 @@ def create_app(config=None):
         if action not in ('download', 'rotate'):
             abort(400)
         try:
-            result = subprocess.run(
-                ['/usr/bin/sudo', '-n', '/usr/local/sbin/openvpn-panel-profile', action, name],
-                check=True, capture_output=True, timeout=120)
-        except (subprocess.SubprocessError, OSError):
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+                connection.settimeout(120)
+                connection.connect('/run/openvpn-panel-pki/broker.sock')
+                connection.sendall(json.dumps(dict(name=name, action=action)).encode() + b'\n')
+                with connection.makefile('rb') as stream:
+                    raw = stream.readline(65537)
+                if len(raw) > 65536 or not raw.endswith(b'\n'):
+                    raise ValueError('invalid broker response')
+                result = json.loads(raw)
+                if result.get('ok') is not True or not isinstance(result.get('profile'), str):
+                    raise ValueError('profile unavailable')
+        except (ValueError, OSError):
             app.logger.error('VPN profile helper failed')
             return render_template('message.html', error='ساخت فایل اتصال ناموفق بود؛ وضعیت سرویس و PKI را بررسی کنید.'), 503
-        return Response(result.stdout, mimetype='application/x-openvpn-profile', headers={
+        return Response(result['profile'], mimetype='application/x-openvpn-profile', headers={
             'Content-Disposition': f'attachment; filename="{name}.ovpn"'})
 
     @app.get('/s/<token>')

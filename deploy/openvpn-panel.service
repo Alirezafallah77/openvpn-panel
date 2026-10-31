@@ -16,7 +16,8 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 ReadWritePaths=/var/lib/openvpn-panel
-# NoNewPrivileges cannot be enabled: one tightly scoped sudo PKI helper is used.
+NoNewPrivileges=true
+PrivateDevices=true
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]

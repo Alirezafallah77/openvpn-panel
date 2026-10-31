@@ -104,7 +104,7 @@ class VPNTests(unittest.TestCase):
 
     def test_rotation_marker_denies_admission(self):
         (self.heartbeat.parent / 'revoke-alice').touch()
-        with self.assertRaises(PermissionError):
+        with patch('vpn.hook.REVOCATIONS', self.heartbeat.parent), self.assertRaises(PermissionError):
             run('connect', self.env, self.q, self.heartbeat)
 
     def test_ipv6_address_matches_management(self):

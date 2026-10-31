@@ -1,0 +1,25 @@
+[Unit]
+Description=OpenVPN restricted certificate broker
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=openvpn-panel
+WorkingDirectory=/opt/openvpn-panel
+ExecStart=/opt/openvpn-panel/.venv/bin/python -Es /opt/openvpn-panel/broker_entry.py
+RuntimeDirectory=openvpn-panel-pki
+RuntimeDirectoryMode=0710
+UMask=0077
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/etc/openvpn-panel /run/openvpn-panel-pki /var/lib/openvpn-panel-revocations
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

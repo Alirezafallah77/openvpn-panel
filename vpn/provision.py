@@ -1,6 +1,4 @@
-"""Standalone root helper; only fixed PKI paths and validated certificate names.
-
-sudoers grants only this root-owned executable wrapper, never arbitrary Python.
+"""PKI operations for the root broker; fixed paths and validated certificate names.
 """
 import fcntl
 import json
@@ -37,7 +35,7 @@ def profile(name, action='download', root=ROOT):
         if action == 'rotate' and cert.exists():
             # Collector is the sole management client; request a disconnect using
             # a root-only marker. Admission hook denies while marker is pending.
-            pending = Path('/run/openvpn-panel') / ('revoke-' + name)
+            pending = Path('/var/lib/openvpn-panel-revocations') / ('revoke-' + name)
             command('openssl', 'ca', '-batch', '-config', config, '-revoke', str(cert))
             # Write CRL atomically. OpenVPN reads it on every handshake.
             tmp = root / 'crl.tmp'

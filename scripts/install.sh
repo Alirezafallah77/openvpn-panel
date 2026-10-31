@@ -27,7 +27,7 @@ source /etc/os-release
 [[ $ENDPOINT =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ && ${#ENDPOINT} -le 253 ]] || { usage; exit 2; }
 [[ -z $DOMAIN || ( $DOMAIN =~ ^[A-Za-z0-9][A-Za-z0-9.-]*$ && ${#DOMAIN} -le 253 ) ]] || { echo 'Invalid domain.' >&2; exit 2; }
 [[ -c /dev/net/tun ]] || { echo 'TUN is unavailable. Enable it with your VPS provider.' >&2; exit 1; }
-[[ ! -e /opt/openvpn-panel && ! -e /etc/openvpn-panel && ! -e /var/lib/openvpn-panel && ! -e /etc/sudoers.d/openvpn-panel ]] || {
+[[ ! -e /opt/openvpn-panel && ! -e /etc/openvpn-panel && ! -e /var/lib/openvpn-panel ]] || {
   echo 'Existing or incomplete installation detected; refusing to overwrite keys/data. See docs/OPERATIONS.md.' >&2; exit 1;
 }
 if find /etc/openvpn -type f \( -name '*.conf' -o -name '*.ovpn' \) -print -quit 2>/dev/null | grep -q .; then
@@ -65,7 +65,7 @@ apt-get install -y "${PACKAGES[@]}"
 getent passwd openvpn-panel >/dev/null || useradd --system --home-dir /var/lib/openvpn-panel --shell /usr/sbin/nologin openvpn-panel
 install -d -o root -g root -m 0755 /opt/openvpn-panel
 # Copy only known application files, not .git, credentials, test databases or venv.
-for file in app.py quota.py hook_entry.py collector_entry.py requirements.txt; do
+for file in app.py quota.py hook_entry.py collector_entry.py broker_entry.py requirements.txt; do
   install -m 0644 "$SOURCE/$file" /opt/openvpn-panel/
 done
 for dir in vpn templates static; do
@@ -78,6 +78,7 @@ python3 -m venv /opt/openvpn-panel/.venv
 /opt/openvpn-panel/.venv/bin/pip install -r /opt/openvpn-panel/requirements.txt
 chmod -R a+rX /opt/openvpn-panel/.venv
 install -d -o openvpn-panel -g openvpn-panel -m 0770 /var/lib/openvpn-panel
+install -d -o root -g root -m 0700 /var/lib/openvpn-panel-revocations
 install -d -m 0755 /etc/openvpn/server
 /opt/openvpn-panel/.venv/bin/python "$SOURCE/scripts/configure.py" "$ENDPOINT" "$DOMAIN" "$INTERFACE" "$PASSWORD_FILE"
 # Make DB before OpenVPN hooks run. All writers use group-compatible journals.
@@ -87,7 +88,7 @@ install -m 0644 "$SOURCE"/deploy/*.service /etc/systemd/system/
 install -d /etc/systemd/system/openvpn-server@panel.service.d
 install -m 0644 "$SOURCE/deploy/openvpn-override.conf" /etc/systemd/system/openvpn-server@panel.service.d/panel.conf
 systemctl daemon-reload
-systemctl enable --now openvpn-panel-network.service openvpn-panel.service
+systemctl enable --now openvpn-panel-network.service openvpn-panel.service openvpn-panel-pki.service
 systemctl enable --now openvpn-server@panel.service
 if [[ -n $DOMAIN ]]; then
   caddy validate --config /etc/caddy/Caddyfile
@@ -95,7 +96,7 @@ if [[ -n $DOMAIN ]]; then
   systemctl restart caddy
 fi
 sleep 3
-systemctl is-active --quiet openvpn-panel-accounting.service openvpn-server@panel.service openvpn-panel.service
+systemctl is-active --quiet openvpn-panel-accounting.service openvpn-server@panel.service openvpn-panel.service openvpn-panel-pki.service
 printf '\nInstalled. Allow UDP 1194 in your provider firewall.\n'
 if [[ -n $DOMAIN ]]; then
   printf 'Panel: https://%s (DNS must point here; allow TCP 80/443 for HTTPS).\n' "$DOMAIN"

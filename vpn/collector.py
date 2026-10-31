@@ -8,6 +8,7 @@ from quota import Quotas
 
 SOCKET = '/run/openvpn-panel/management.sock'
 HEARTBEAT = '/run/openvpn-panel/heartbeat'
+REVOCATIONS = Path('/var/lib/openvpn-panel-revocations')
 NAME = re.compile(r'[A-Za-z0-9_-]{1,64}\Z', re.ASCII)
 
 
@@ -89,7 +90,7 @@ def enforce(quotas, management):
         except KeyError:
             management.kill(name)  # Unknown certificates/sessions never get free traffic.
             continue
-        if not state.allowed or (Path(HEARTBEAT).parent / ('revoke-' + name)).exists():
+        if not state.allowed or (REVOCATIONS / ('revoke-' + name)).exists():
             management.kill(name)
 
 
@@ -109,7 +110,7 @@ def main():
             # A second snapshot ensures the killed connection is absent before
             # admitting the replacement certificate with the same common name.
             live = {row[0] for row in management.status()}
-            for marker in Path(HEARTBEAT).parent.glob('revoke-*'):
+            for marker in REVOCATIONS.glob('revoke-*'):
                 if marker.name[7:] not in live:
                     marker.unlink(missing_ok=True)
             Path(HEARTBEAT).touch(mode=0o600)

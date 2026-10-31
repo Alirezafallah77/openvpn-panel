@@ -8,6 +8,7 @@ from quota import Quotas
 
 DATABASE = '/var/lib/openvpn-panel/quota.sqlite'
 HEARTBEAT = '/run/openvpn-panel/heartbeat'
+REVOCATIONS = Path('/var/lib/openvpn-panel-revocations')
 
 
 def address(env):
@@ -25,7 +26,7 @@ def run(action, env, quotas, heartbeat=HEARTBEAT):
     name = env['common_name']
     peer = address(env)
     if action == 'connect':
-        if (Path(heartbeat).parent / ('revoke-' + name)).exists():
+        if (REVOCATIONS / ('revoke-' + name)).exists():
             raise PermissionError('credential rotation pending')
         age = time.time() - Path(heartbeat).stat().st_mtime
         if not 0 <= age <= 15:
