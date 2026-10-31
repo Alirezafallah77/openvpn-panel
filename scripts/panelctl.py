@@ -21,11 +21,25 @@ def systemctl(*args):
     subprocess.run(['systemctl', *args], check=True)
 
 
+def wait_accounting():
+    deadline = time.monotonic() + 20
+    heartbeat = Path('/run/openvpn-panel/heartbeat')
+    while time.monotonic() < deadline:
+        try:
+            if 0 <= time.time() - heartbeat.stat().st_mtime <= 10:
+                return
+        except FileNotFoundError:
+            pass
+        time.sleep(0.2)
+    raise RuntimeError('Accounting heartbeat not ready; OpenVPN must remain fail-closed')
+
+
 def restart():
     # Explicit ordering avoids a collector EOF racing a new server process.
     systemctl('stop', 'openvpn-server@panel.service')
     systemctl('stop', 'openvpn-panel-accounting.service')
     systemctl('start', 'openvpn-server@panel.service')
+    wait_accounting()
     systemctl('restart', 'openvpn-panel.service', 'openvpn-panel-pki.service')
 
 
@@ -92,6 +106,7 @@ def restore(source, password_file=None, yes=False):
             def activate():
                 systemctl('start', 'openvpn-panel-pki', 'openvpn-panel')
                 systemctl('start', 'openvpn-server@panel')
+                wait_accounting()
                 for unit in ('openvpn-panel-pki', 'openvpn-panel', 'openvpn-server@panel', 'openvpn-panel-accounting'):
                     systemctl('is-active', '--quiet', unit)
             try:

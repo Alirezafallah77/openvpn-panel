@@ -162,7 +162,7 @@ def control_web(action):
         raise ValueError('Invalid web action')
     # Delay permits the UI to return an acknowledgement before its worker exits.
     subprocess.run(['/usr/bin/systemd-run', '--quiet', '--collect',
-        '--unit=openvpn-panel-web-' + uuid.uuid4().hex, '--on-active=3s',
+        '--unit=openvpn-panel-web-' + uuid.uuid4().hex, '--on-active=3s', '--timer-property=AccuracySec=1s',
         '/usr/bin/systemctl', action, 'openvpn-panel.service'], check=True,
         capture_output=True, timeout=10)
     return {'scheduled': True}

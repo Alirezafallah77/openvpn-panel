@@ -160,9 +160,17 @@ def main():
         Path('/root/migration-passphrase').chmod(0o600)
         first = q.status('e2e').first_connected
         # Verify downtime controls never stop VPN or its accounting.
+        old_pid = subprocess.check_output(['systemctl','show','--property=MainPID','--value','openvpn-panel']).strip()
         post('/system/web', dict(password=PASSWORD, confirm='1', action='restart'))
-        time.sleep(5)
-        cmd('systemctl','is-active','--quiet','openvpn-panel')
+        def web_restarted():
+            new_pid = subprocess.check_output(['systemctl','show','--property=MainPID','--value','openvpn-panel']).strip()
+            if new_pid in (old_pid,b'0'):
+                return False
+            try:
+                return opener.open(BASE + '/login', timeout=3).status == 200
+            except Exception:
+                return False
+        wait_for(web_restarted, 'web restart completes with new serving process')
         cmd('systemctl','is-active','--quiet','openvpn-server@panel')
         post('/system/web', dict(password=PASSWORD, confirm='1', action='stop'))
         wait_for(lambda: subprocess.run(['systemctl','is-active','--quiet','openvpn-panel']).returncode != 0,
