@@ -189,3 +189,54 @@ class WebTests(unittest.TestCase):
             broker.assert_called_with(dict(operation='vpn-save',protocol='tcp',endpoint='vpn.example.com'))
             self.assertEqual(self.post('/settings/ssl',dict(password='test-password-123',domain='panel.example.com',confirm='1',use_for_vpn='1')).status_code,200)
             broker.assert_called_with(dict(operation='ssl-save',domain='panel.example.com',use_for_vpn=True))
+
+    def test_subscriber_portal_guides_and_non_rotating_private_download(self):
+        token = self.q.create_user('alice', 1024**3, 30)
+        self.q.create_user('bob', 1024**3, 30)
+        self.app.config['VPN_CONFIGURED'] = True
+        public = self.app.test_client()
+        page = public.get('/s/' + token)
+        for label in ('راهنمای اتصال', 'اندروید', 'آیفون', 'ویندوز', 'حجم کل', 'سپری‌شده'):
+            self.assertIn(label.encode(), page.data)
+        self.assertIn(b'id="tab-guide"', page.data)
+        self.assertIn("script-src 'self'", page.headers['Content-Security-Policy'])
+        self.assertIn(b'name="csrf"', page.data)
+        with public.session_transaction() as session:
+            csrf = session['csrf']
+        with patch('app.request_profile', return_value='client\n<key>private</key>') as broker:
+            self.assertEqual(public.get('/s/'+token+'/profile').status_code,405)
+            self.assertEqual(public.post('/s/'+token+'/profile').status_code,400)
+            result=public.post('/s/'+token+'/profile',data=dict(csrf=csrf,name='bob',action='rotate'))
+            self.assertEqual(result.status_code,200)
+            broker.assert_called_once_with('alice','download')
+            self.assertEqual(result.headers['Cache-Control'],'no-store')
+            self.assertIn('alice.ovpn',result.headers['Content-Disposition'])
+            self.assertIn('noindex',result.headers['X-Robots-Tag'])
+        self.assertIsNone(self.q.status('alice').first_connected)
+        new_token=self.q.rotate_token('alice')
+        self.assertEqual(public.post('/s/'+token+'/profile',data=dict(csrf=csrf)).status_code,404)
+        self.q.set_enabled('alice',False)
+        with patch('app.request_profile') as broker:
+            self.assertEqual(public.post('/s/'+new_token+'/profile',data=dict(csrf=csrf)).status_code,403)
+            broker.assert_not_called()
+
+    def test_subscriber_download_exhaustion_expiry_failure_and_throttle(self):
+        token=self.q.create_user('alice',1024,1)
+        self.app.config['VPN_CONFIGURED']=True
+        self.client.get('/s/'+token)
+        with self.client.session_transaction() as session:
+            csrf=session['csrf']
+        with patch('app.request_profile',side_effect=OSError('private-path-never-public')):
+            result=self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf))
+            self.assertEqual(result.status_code,503)
+            self.assertNotIn(b'private-path-never-public',result.data)
+        with patch('app.request_profile',return_value='profile') as broker:
+            for _ in range(5):
+                self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf)).status_code,200)
+            self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf)).status_code,429)
+            self.assertEqual(broker.call_count,5)
+        self.q.connect('alice','old',now=1)
+        self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf)).status_code,403)
+        self.q.update_limits('alice',1024,3650)
+        self.q.account('old',1024,0)
+        self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf)).status_code,403)

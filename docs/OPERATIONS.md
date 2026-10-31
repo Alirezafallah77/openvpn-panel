@@ -139,3 +139,18 @@ sudo systemctl list-timers openvpn-panel-backup.timer
 ## حذف
 
 ابتدا بکاپ بگیرید؛ timer و سرویس‌های پروژه را stop/disable کنید، از جمله `openvpn-server@panel` و `openvpn-panel-network`. توقف network فقط قواعد اختصاصی پروژه را حذف می‌کند. Caddy یا IPv4 forwarding را اگر سرویس دیگری استفاده می‌کند کورکورانه حذف/خاموش نکنید. فایل `/etc/sysctl.d/70-openvpn-panel.conf` forwarding را فعال نگه می‌دارد. بکاپ‌ها، کلیدها و تنظیمات Telegram همچنان روی دیسک‌اند؛ پاک‌کردن آن‌ها نیازمند تصمیم آگاهانه و بکاپ امن است.
+
+
+## خطای SSL پس از نصب بدون دامنه
+
+وجود رکورد A به‌تنهایی کافی نیست. برای راه‌اندازی اولیه در Cloudflare ابر رکورد را خاکستری / DNS only کنید؛ A باید IPv4 همین VPS باشد. AAAA نامعتبر را حذف کنید. TCP 80 و 443 باید هم در فایروال سیستم و هم provider باز باشند؛ سرویس دیگری نباید این پورت‌ها را اشغال کرده باشد. پنل بدون اجازه nginx/Apache یا فایروال موجود را تغییر نمی‌دهد. CAA محدودکننده، ساعت نادرست، DNSSEC خراب، انتشار DNS و محدودیت/دسترسی خروجی ACME را نیز بررسی کنید.
+
+در نسخهٔ 0.4 پس از یک تلاش تازه، کد و مرحلهٔ شکست در SSL Management ذخیره می‌شود. `tls_certificate` یعنی گواهی نام/زنجیرهٔ معتبر روی loopback در ۱۸۰ ثانیه آماده نشد؛ `panel_https` یعنی TLS تأیید شد ولی /login پاسخ 200 نداد. `caddy_start` و `caddy_validate` خطاهای شروع/پیکربندی هستند. خطاهای قدیمی کد جدید ندارند. قفل تراکنش و بازگردانی خودکار حفظ شده‌اند؛ سرویس گذرا سقف ۴۲۰ ثانیه دارد و درخواست هم‌زمان رد می‌شود.
+
+```bash
+sudo journalctl -u caddy -u openvpn-panel --since "15 minutes ago" --no-pager
+sudo journalctl -u 'openvpn-panel-settings-*' --since "15 minutes ago" --no-pager
+sudo ss -ltnp '( sport = :80 or sport = :443 )'
+```
+
+لاگ‌ها ممکن است دامنه، IP و در برخی خطاهای پراکسی URI حساس داشته باشند؛ قبل از ارسال بازبینی کنید. هرگز panel.env، کلید خصوصی، توکن یا فایل .ovpn ارسال نکنید. گواهی/نام میزبان را برای عبور از این خطا غیرفعال نکنید. اگر لازم شد: `sudo openvpn-panelctl settings-rollback`. پس از موفقیت، آدرس HTTPS جدید را باز و دوباره وارد شوید؛ برای اشتراک عمومی در حالت SSH، لینک localhost قابل استفادهٔ کاربران بیرون سرور نیست.

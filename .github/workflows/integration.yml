@@ -70,6 +70,9 @@ jobs:
           fi
           AFTER=$(sudo sha256sum /etc/openvpn-panel/pki/ca.key)
           test "$BEFORE" = "$AFTER"
+      - name: Verify fresh SSH-to-domain failure and automatic rollback
+        if: matrix.mode == 'ssh'
+        run: sudo /opt/openvpn-panel/.venv/bin/python tests/integration_ssl_failure.py
       - name: Configure private test HTTPS CA (no public DNS or ACME required)
         if: matrix.mode == 'https'
         run: |

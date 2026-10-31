@@ -7,6 +7,7 @@ from contextlib import contextmanager
 import fcntl
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import re
@@ -21,7 +22,21 @@ from vpn.maintenance import atomic_json, read_json
 ROOT = Path('/etc/openvpn-panel')
 SERVER = Path('/etc/openvpn/server/panel.conf')
 CADDY = Path('/etc/caddy/Caddyfile')
-TLS_TIMEOUT = 100
+TLS_TIMEOUT = 180
+HTTP_TIMEOUT = 30
+
+
+class SettingsFailure(RuntimeError):
+    """Stable public diagnostic code; never expose subprocess output to the web."""
+    def __init__(self, code):
+        self.code = code
+        super().__init__(code)
+
+
+def stage(name):
+    state = read_json(ROOT/'settings-state.json', {})
+    state.update(stage=name, updated_at=int(time.time()))
+    atomic_json(ROOT/'settings-state.json', state)
 
 
 def domain(value):
@@ -139,11 +154,21 @@ def probe_tls(host, timeout=2):
         with socket.create_connection(('127.0.0.1',443), timeout=timeout) as raw:
             with context.wrap_socket(raw, server_hostname=host) as secure:
                 certificate = secure.getpeercert()
-                secure.sendall(f'GET /login HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n'.encode('ascii'))
-                line = secure.recv(4096).split(b'\r\n',1)[0]
-        return dict(valid=True, expires=int(ssl.cert_time_to_seconds(certificate['notAfter'])),
+                result = dict(valid=True, expires=int(ssl.cert_time_to_seconds(certificate['notAfter'])),
                     issuer=', '.join(value for group in certificate.get('issuer',()) for _,value in group),
-                    http_ok=bool(re.match(rb'HTTP/1\.[01] 200(?: |$)',line)))
+                    http_ok=False)
+                # An HTTP timeout must not erase a successfully verified TLS chain.
+                try:
+                    secure.sendall(f'GET /login HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n'.encode('ascii'))
+                    line = b''
+                    while b'\r\n' not in line and len(line) < 4096:
+                        data = secure.recv(512)
+                        if not data: break
+                        line += data
+                    result['http_ok'] = bool(re.match(rb'HTTP/1\.[01] 200(?: |$)', line.split(b'\r\n',1)[0]))
+                except OSError:
+                    pass
+                return result
     except (OSError, ValueError, ssl.SSLError):
         return dict(valid=False, expires=None, issuer='', http_ok=False)
 
@@ -169,7 +194,7 @@ def queue(message):
         raise ValueError('Unknown settings fields')
     with locked(blocking=False):
         state = read_json(ROOT/'settings-state.json', {})
-        if state.get('status') in ('queued','running') and time.time()-state.get('updated_at',0) < 300:
+        if state.get('status') in ('queued','running') and time.time()-state.get('updated_at',0) < 480:
             raise ValueError('Settings change already in progress')
         job_id = uuid.uuid4().hex
         request['job_id'] = job_id
@@ -178,7 +203,7 @@ def queue(message):
         try:
             command('/usr/bin/systemd-run','--quiet','--collect', '--unit=openvpn-panel-settings-'+job_id,
                     '--on-active=3s','--timer-property=AccuracySec=1s',
-                    '--property=RuntimeMaxSec=240', '/usr/local/sbin/openvpn-panelctl','apply-settings')
+                    '--property=RuntimeMaxSec=420', '/usr/local/sbin/openvpn-panelctl','apply-settings')
         except Exception:
             atomic_json(ROOT/'settings-state.json',dict(status='failed',error='queue_failed',updated_at=int(time.time())))
             (ROOT/'settings-pending.json').unlink(missing_ok=True)
@@ -230,22 +255,28 @@ def restart_web():
 
 
 def caddy_apply(saved):
-    command('caddy','validate','--config',str(CADDY))
-    systemctl('reset-failed','caddy.service')
-    if active('caddy.service'):
-        systemctl('reload','caddy.service')
-    else:
-        systemctl('start','caddy.service')
+    try:
+        command('caddy','validate','--config',str(CADDY))
+    except Exception as error:
+        raise SettingsFailure('caddy_validate') from error
+    try:
+        systemctl('reset-failed','caddy.service')
+        if active('caddy.service'):
+            systemctl('reload','caddy.service')
+        else:
+            systemctl('start','caddy.service')
+    except Exception as error:
+        raise SettingsFailure('caddy_start') from error
 
 
 def wait_tls(host, http=False):
-    end = time.monotonic()+TLS_TIMEOUT
+    end = time.monotonic()+(HTTP_TIMEOUT if http else TLS_TIMEOUT)
     while time.monotonic() < end:
         result = probe_tls(host)
         if result['valid'] and (not http or result['http_ok']):
             return result
         time.sleep(2)
-    raise RuntimeError('TLS certificate or panel HTTPS not ready')
+    raise SettingsFailure('panel_https' if http else 'tls_certificate')
 
 
 def apply_ssl(request, saved):
@@ -257,7 +288,9 @@ def apply_ssl(request, saved):
     if old != host or not CADDY.is_file():
         hosts = ', '.join(dict.fromkeys([h for h in (old,host) if h]))
         write(CADDY, hosts+' {\n    reverse_proxy 127.0.0.1:8000\n}\n',0o644)
+    stage('caddy')
     caddy_apply(saved)
+    stage('certificate')
     wait_tls(host)  # Certificate must verify before switching panel cookies/hosts.
     with (ROOT/'pki/lock').open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX)
@@ -270,7 +303,12 @@ def apply_ssl(request, saved):
             conf = load_config()
             conf['endpoint'] = host
             atomic_json(ROOT/'vpn.json',conf)
-        restart_web()
+        stage('web_restart')
+        try:
+            restart_web()
+        except Exception as error:
+            raise SettingsFailure('web_restart') from error
+    stage('https_check')
     wait_tls(host,http=True)
     systemctl('enable','caddy.service')
 
@@ -301,7 +339,10 @@ def apply_pending():
         try:
             if operation=='ssl-save': apply_ssl(request,saved)
             else: apply_vpn(request)
-        except Exception:
+        except Exception as failure:
+            diagnostic = failure.code if isinstance(failure, SettingsFailure) else 'unexpected'
+            failed_stage = read_json(ROOT/'settings-state.json',{}).get('stage','vpn')
+            logging.exception('Network settings failed: operation=%s stage=%s code=%s', operation, failed_stage, diagnostic)
             rollback_ok = True
             try:
                 with (ROOT/'pki/lock').open('a') as lock:
@@ -316,7 +357,7 @@ def apply_pending():
             except Exception:
                 rollback_ok = False
             atomic_json(ROOT/'settings-state.json',dict(status='failed',operation=operation,
-                error='apply_failed' if rollback_ok else 'rollback_failed',updated_at=int(time.time())))
+                error='apply_failed' if rollback_ok else 'rollback_failed', diagnostic=diagnostic, stage=failed_stage, updated_at=int(time.time())))
         else:
             atomic_json(ROOT/'settings-state.json',dict(status='completed',operation=operation,updated_at=int(time.time())))
         finally:

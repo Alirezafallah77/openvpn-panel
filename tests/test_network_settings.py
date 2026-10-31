@@ -120,3 +120,45 @@ class NetworkSettingsTests(unittest.TestCase):
         self.assertIn('PANEL_EXTRA_HOSTS=old.example.com',(self.root/'panel.env').read_text())
         self.assertIn('old.example.com, new.example.com',self.caddy.read_text())
         self.assertEqual(n.load_config()['endpoint'],'new.example.com')
+
+    def test_ssh_to_domain_removes_insecure_cookie_flag_only_after_tls(self):
+        (self.root/'panel.env').write_text('PANEL_HOST=localhost\nPANEL_LOCAL_HTTP=1\nPANEL_SECRET=keep\n')
+        def verified(*args,**kwargs):
+            if not kwargs.get('http'):
+                self.assertIn('PANEL_LOCAL_HTTP=1',(self.root/'panel.env').read_text())
+        n.wait_tls.side_effect=verified
+        n.queue(dict(operation='ssl-save',domain='new.example.com',use_for_vpn=True))
+        n.apply_pending()
+        self.assertEqual(n.current_domain(),'new.example.com')
+        self.assertNotIn('PANEL_LOCAL_HTTP=',(self.root/'panel.env').read_text())
+        self.assertNotIn('localhost,',self.caddy.read_text())
+        self.assertEqual(json.loads((self.root/'settings-state.json').read_text())['status'],'completed')
+
+    def test_failure_code_survives_rollback_without_exposing_exception(self):
+        n.queue(dict(operation='ssl-save',domain='new.example.com',use_for_vpn=True))
+        n.wait_tls.side_effect=n.SettingsFailure('tls_certificate')
+        with self.assertLogs(level='ERROR'):
+            n.apply_pending()
+        state=json.loads((self.root/'settings-state.json').read_text())
+        self.assertEqual(state['diagnostic'],'tls_certificate')
+        self.assertEqual(state['stage'],'certificate')
+        self.assertEqual(state['error'],'apply_failed')
+        self.assertEqual(n.current_domain(),'old.example.com')
+
+    def test_verified_certificate_not_lost_on_http_timeout_or_partial_status_line(self):
+        # Exercise the real probe, not wait_tls: valid chain != HTTP readiness.
+        certificate={'notAfter':'Dec 31 23:59:59 2030 GMT','issuer':()}
+        for packets, expected in [(TimeoutError('backend slow'),False),([b'HTTP/1.',b'1 200 OK\r\n'],True)]:
+            secure=Mock()
+            secure.getpeercert.return_value=certificate
+            secure.recv.side_effect=packets
+            context=Mock()
+            context.wrap_socket.return_value.__enter__=Mock(return_value=secure)
+            context.wrap_socket.return_value.__exit__=Mock(return_value=False)
+            raw=Mock()
+            raw.__enter__=Mock(return_value=raw)
+            raw.__exit__=Mock(return_value=False)
+            with patch.object(n.ssl,'create_default_context',return_value=context), patch.object(n.socket,'create_connection',return_value=raw):
+                result=n.probe_tls('panel.example.com')
+            self.assertTrue(result['valid'])
+            self.assertEqual(result['http_ok'],expected)

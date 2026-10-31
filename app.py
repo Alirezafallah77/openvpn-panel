@@ -52,6 +52,7 @@ def create_app(config=None):
     # Global (not client-IP based) throttle also works behind a reverse proxy.
     # Single worker deployment is required; use shared storage before scaling.
     attempts = []
+    profile_attempts = []
     lock = Lock()
 
     @app.before_request
@@ -65,9 +66,10 @@ def create_app(config=None):
     @app.after_request
     def headers(response):
         response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['X-Content-Type-Options'] = 'nosniff'
-        response.headers['Content-Security-Policy'] = "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
+        response.headers['Content-Security-Policy'] = "default-src 'none'; style-src 'self'; font-src 'self'; script-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'"
         if request.is_secure:
             response.headers['Strict-Transport-Security'] = 'max-age=31536000'
         return response
@@ -306,7 +308,35 @@ def create_app(config=None):
         state = quotas.status_by_token(token)
         if state is None:
             abort(404)
-        return render_template('status.html', user=state)
+        return render_template('status.html', user=state, token=token, public_page=True)
+
+    @app.post('/s/<token>/profile')
+    def subscription_profile(token):
+        # Bearer link authorizes only its own identity and a non-rotating download.
+        if not re.fullmatch(r'[A-Za-z0-9_-]{43}', token, re.ASCII):
+            abort(404)
+        state = quotas.status_by_token(token)
+        if state is None:
+            abort(404)
+        if not state.allowed:
+            return render_template('message.html', public_page=True,
+                                   error='اشتراک شما فعال نیست؛ برای تمدید با پشتیبانی تماس بگیرید.'), 403
+        if not app.config['VPN_CONFIGURED']:
+            abort(503)
+        with lock:
+            now = time.monotonic()
+            profile_attempts[:] = [(t, name) for t, name in profile_attempts if now - t < 60]
+            if len(profile_attempts) >= 60 or sum(name == state.name for _, name in profile_attempts) >= 6:
+                abort(429, description='برای دانلود مجدد یک دقیقه صبر کنید.')
+            profile_attempts.append((now, state.name))
+        try:
+            profile = request_profile(state.name, 'download')
+        except (ValueError, OSError):
+            return render_template('message.html', public_page=True,
+                                   error='فایل اتصال فعلاً آماده نیست؛ کمی بعد تلاش کنید یا به پشتیبانی اطلاع دهید.'), 503
+        return Response(profile, mimetype='application/x-openvpn-profile', headers={
+            'Content-Disposition': f'attachment; filename="{state.name}.ovpn"',
+            'X-Robots-Tag': 'noindex, nofollow, noarchive'})
 
     @app.template_filter('utc')
     def utc(value):

@@ -53,7 +53,10 @@ def main():
     body = post('/users', dict(name='e2e', gib='1', days='30')).decode()
     token = re.search(r'/s/([A-Za-z0-9_-]{43})', body).group(1)
     assert opener.open(BASE + '/s/' + token).status == 200
-    profile = post('/users/e2e/profile', {})
+    portal=opener.open(BASE+'/s/'+token).read()
+    assert 'راهنمای اتصال'.encode() in portal
+    assert b'id="tab-android"' in portal and b'id="tab-ios"' in portal and b'id="tab-windows"' in portal
+    profile = post('/s/'+token+'/profile', {})
     assert b'<key>' in profile and b'remote 192.0.2.1 1194' in profile
     Path('/tmp/e2e.ovpn').write_bytes(profile)
     cmd('ip', 'netns', 'add', 'ovp-test')
