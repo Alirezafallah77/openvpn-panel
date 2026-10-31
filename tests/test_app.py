@@ -173,3 +173,19 @@ class WebTests(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertIn(b'openvpn-panelctl web-start', response.data)
             broker.assert_called_once_with(dict(operation='web-control',action='stop'))
+
+    def test_network_settings_require_auth_csrf_password_and_confirmation(self):
+        self.assertEqual(self.client.get('/settings/network').status_code,302)
+        self.login()
+        self.app.config['VPN_CONFIGURED']=True
+        public=dict(endpoint='192.0.2.1',protocol='udp',port=1194,domain='',caddy_managed=True,
+                    caddy_installed=True,tls=dict(valid=False,expires=None,issuer='',http_ok=False),job={})
+        with patch('app.maintenance_request',return_value=public) as broker:
+            self.assertEqual(self.client.get('/settings/network').status_code,200)
+            self.assertEqual(self.post('/settings/ssl',dict(password='wrong',domain='panel.example.com',confirm='1')).status_code,403)
+            self.assertEqual(self.post('/settings/ssl',dict(password='test-password-123',domain='bad.com\n{bad}',confirm='1')).status_code,400)
+            self.assertEqual(self.post('/settings/vpn',dict(password='test-password-123',protocol='tcp',endpoint='192.0.2.1')).status_code,400)
+            self.assertEqual(self.post('/settings/vpn',dict(password='test-password-123',protocol='tcp',endpoint='vpn.example.com',confirm='1')).status_code,200)
+            broker.assert_called_with(dict(operation='vpn-save',protocol='tcp',endpoint='vpn.example.com'))
+            self.assertEqual(self.post('/settings/ssl',dict(password='test-password-123',domain='panel.example.com',confirm='1',use_for_vpn='1')).status_code,200)
+            broker.assert_called_with(dict(operation='ssl-save',domain='panel.example.com',use_for_vpn=True))

@@ -99,7 +99,13 @@ def restore(source, password_file=None, yes=False):
     with tempfile.TemporaryDirectory(prefix='panel-restore-') as temp:
         stage = Path(temp)
         backups.validate_archive(data, stage)  # Before stopping anything.
-        with Path('/etc/openvpn-panel/backup.lock').open('a') as maintenance:
+        with Path('/etc/openvpn-panel/settings.lock').open('a') as network_lock, Path('/etc/openvpn-panel/backup.lock').open('a') as maintenance:
+            fcntl.flock(network_lock, fcntl.LOCK_EX)
+            pending = Path('/etc/openvpn-panel/settings-pending.json')
+            if pending.exists():
+                pending.unlink()
+                from vpn.maintenance import atomic_json
+                atomic_json(Path('/etc/openvpn-panel/settings-state.json'),dict(status='cancelled',updated_at=int(time.time())))
             fcntl.flock(maintenance, fcntl.LOCK_EX)
             timer_active = subprocess.run(['systemctl', 'is-active', '--quiet', 'openvpn-panel-backup.timer']).returncode == 0
             systemctl('stop', 'openvpn-panel-backup.timer', 'openvpn-panel-backup.service')
@@ -135,13 +141,19 @@ def main():
         raise SystemExit('Run with sudo.')
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['status', 'restart', 'password', 'backup', 'restore', 'web-start', 'web-stop', 'web-restart'])
+    parser.add_argument('action', choices=['status', 'restart', 'password', 'backup', 'restore', 'web-start', 'web-stop', 'web-restart', 'apply-settings', 'settings-rollback'])
     parser.add_argument('destination', nargs='?')
     parser.add_argument('--encrypt', action='store_true', help='Encrypt backup with AES-256-GCM')
     parser.add_argument('--passphrase-file', help='Root-owned 0600 file (otherwise prompts)')
     parser.add_argument('--yes', action='store_true', help='Confirm destructive restore')
     args = parser.parse_args()
-    if args.action == 'status':
+    if args.action in ('apply-settings','settings-rollback'):
+        from vpn import network_settings
+        if args.action == 'apply-settings':
+            network_settings.apply_pending()
+        else:
+            network_settings.rollback()
+    elif args.action == 'status':
         systemctl('status', '--no-pager', 'openvpn-panel', 'openvpn-panel-pki',
                   'openvpn-panel-accounting', 'openvpn-server@panel')
     elif args.action == 'restart':

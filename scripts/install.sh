@@ -57,10 +57,15 @@ fi
 if [[ -n $DOMAIN ]] && ss -H -ltn '( sport = :80 or sport = :443 )' | grep -q .; then
   echo 'HTTP/HTTPS port already in use.' >&2; exit 1
 fi
+CADDY_NEW=0
+if ! command -v caddy >/dev/null; then
+  CADDY_NEW=1
+  systemctl mask --runtime caddy.service
+fi
+trap 'if [[ $CADDY_NEW == 1 ]]; then systemctl unmask --runtime caddy.service >/dev/null 2>&1 || true; fi' EXIT
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
-PACKAGES=(python3 python3-venv openvpn openssl iptables sudo ca-certificates)
-[[ -z $DOMAIN ]] || PACKAGES+=(caddy)
+PACKAGES=(python3 python3-venv openvpn openssl iptables sudo ca-certificates caddy)
 apt-get install -y "${PACKAGES[@]}"
 getent passwd openvpn-panel >/dev/null || useradd --system --home-dir /var/lib/openvpn-panel --shell /usr/sbin/nologin openvpn-panel
 install -d -o root -g root -m 0755 /opt/openvpn-panel
@@ -82,6 +87,11 @@ install -d -o root -g root -m 0700 /var/lib/openvpn-panel-revocations
 install -d -o root -g openvpn-panel -m 0710 /var/lib/openvpn-panel-backups /var/lib/openvpn-panel-status
 install -d -m 0755 /etc/openvpn/server
 /opt/openvpn-panel/.venv/bin/python "$SOURCE/scripts/configure.py" "$ENDPOINT" "$DOMAIN" "$INTERFACE" "$PASSWORD_FILE"
+/opt/openvpn-panel/.venv/bin/python -Es -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from vpn.network_settings import bootstrap; bootstrap(bool(int(sys.argv[1])))" "$CADDY_NEW"
+if [[ $CADDY_NEW == 1 ]]; then
+  systemctl unmask --runtime caddy.service
+  if [[ -z $DOMAIN ]]; then systemctl disable --now caddy.service; fi
+fi
 # Make DB before OpenVPN hooks run. All writers use group-compatible journals.
 sudo -u openvpn-panel /opt/openvpn-panel/.venv/bin/python -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from quota import Quotas; Quotas('/var/lib/openvpn-panel/quota.sqlite')"
 chmod 0660 /var/lib/openvpn-panel/quota.sqlite

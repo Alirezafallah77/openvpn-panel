@@ -1,6 +1,6 @@
 {% extends 'base.html' %}{% block content %}
 <form action="{{ url_for('logout') }}" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="secondary">خروج</button></form>
-<nav><a href="{{ url_for('dashboard') }}">به‌روزرسانی آمار</a> {% if vpn_configured %} • <a href="{{ url_for('backup_page') }}">بکاپ، انتقال سرور و تلگرام</a>{% endif %}</nav>
+<nav><a href="{{ url_for('dashboard') }}">به‌روزرسانی آمار</a> {% if vpn_configured %} • <a href="{{ url_for('backup_page') }}">بکاپ، انتقال سرور و تلگرام</a> • <a href="{{ url_for('network_page') }}">SSL Management / OpenVPN Protocol</a>{% endif %}</nav>
 <section><h2>وضعیت سرور</h2><div class="cards">
 {% for label, value in [('CPU USAGE', metrics.cpu), ('RAM USAGE', metrics.ram), ('SWAP USAGE', metrics.swap), ('DISK USAGE', metrics.disk)] %}<article><span>{{ label }}</span><strong>{{ value }}%</strong></article>{% endfor %}</div>
 <p>RAM: {{ metrics.ram_used|gib }} / {{ metrics.ram_total|gib }} GiB • SWAP: {{ metrics.swap_used|gib }} / {{ metrics.swap_total|gib }} GiB {% if not metrics.swap_total %}(بدون Swap){% endif %} • DISK /: {{ metrics.disk_used|gib }} / {{ metrics.disk_total|gib }} GiB</p></section>

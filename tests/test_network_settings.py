@@ -1,0 +1,113 @@
+import json
+from pathlib import Path
+import tempfile
+import unittest
+from unittest.mock import patch, Mock
+from vpn import network_settings as n
+
+
+class NetworkSettingsTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name)
+        (self.root/'pki').mkdir()
+        self.server = self.root/'server.conf'
+        self.caddy = self.root/'Caddyfile'
+        self.server.write_text('port 1194\nproto udp4\ndev tun-panel\n')
+        self.caddy.write_text('old.example.com {\n reverse_proxy 127.0.0.1:8000\n}\n')
+        (self.root/'panel.env').write_text("PANEL_HOST=old.example.com\nPANEL_SECRET=keep-secret\nPANEL_PASSWORD_HASH='hash$with$dollars'\n")
+        (self.root/'vpn.json').write_text('{"endpoint":"192.0.2.1","port":1194,"protocol":"udp"}')
+        (self.root/'caddy-owned').write_text('managed')
+        self.patches = [patch.object(n,'ROOT',self.root), patch.object(n,'SERVER',self.server),
+            patch.object(n,'CADDY',self.caddy), patch.object(n,'command',return_value=Mock(returncode=0)),
+            patch.object(n,'active',return_value=False), patch.object(n.subprocess,'run',return_value=Mock(returncode=0)),
+            patch.object(n,'restart_vpn'), patch.object(n,'restart_web'), patch.object(n,'wait_tls'),
+            patch.object(n.shutil,'which',return_value='/usr/bin/caddy')]
+        for p in self.patches: p.start()
+
+    def tearDown(self):
+        for p in reversed(self.patches): p.stop()
+        self.temp.cleanup()
+
+    def test_strict_domain_endpoint_protocol_validation(self):
+        self.assertEqual(n.domain(' PANEL.Example.com. '),'panel.example.com')
+        self.assertEqual(n.endpoint('192.0.2.1'),'192.0.2.1')
+        for bad in ['https://example.com','example.com:443','a.com/path','*.example.com',
+                    'example.com\n{shell}', '192.0.2.1', 'localhost', '-a.example.com', 'evil..example.com']:
+            with self.assertRaises(ValueError): n.domain(bad)
+        for bad in ['tcp4-server','udp; id','',None]:
+            with self.assertRaises(ValueError): n.protocol(bad)
+
+    def test_queues_fixed_root_worker_and_rejects_overlap(self):
+        result=n.queue(dict(operation='vpn-save',protocol='tcp',endpoint='vpn.example.com'))
+        self.assertTrue(result['queued'])
+        request=json.loads((self.root/'settings-pending.json').read_text())
+        self.assertEqual(request['protocol'],'tcp')
+        args=n.command.call_args.args
+        self.assertEqual(args[-2:],('/usr/local/sbin/openvpn-panelctl','apply-settings'))
+        self.assertNotIn('vpn.example.com',args)
+        with self.assertRaises(ValueError): n.queue(dict(operation='vpn-save',protocol='udp',endpoint='192.0.2.1'))
+        with self.assertRaises(ValueError): n.queue(dict(operation='vpn-save',protocol='udp',endpoint='192.0.2.1',path='/etc/shadow'))
+
+    def test_tcp_and_udp_update_server_metadata_without_touching_pki(self):
+        (self.root/'pki/key').write_text('unchanged-private-key')
+        n.apply_vpn(dict(protocol='tcp',endpoint='vpn.example.com'))
+        self.assertIn('proto tcp4-server\n',self.server.read_text())
+        self.assertEqual(n.load_config()['endpoint'],'vpn.example.com')
+        self.assertEqual(n.load_config()['protocol'],'tcp')
+        self.assertEqual((self.root/'pki/key').read_text(),'unchanged-private-key')
+        n.apply_vpn(dict(protocol='udp',endpoint='192.0.2.2'))
+        self.assertIn('proto udp4\n',self.server.read_text())
+        self.assertEqual(n.load_config()['protocol'],'udp')
+        self.assertEqual(n.restart_vpn.call_count,2)
+
+    def test_ssl_switch_only_after_certificate_verification_preserves_secret(self):
+        n.queue(dict(operation='ssl-save',domain='panel.example.com',use_for_vpn=True))
+        n.apply_pending()
+        self.assertEqual(n.current_domain(),'panel.example.com')
+        env=(self.root/'panel.env').read_text()
+        self.assertIn('keep-secret',env)
+        self.assertIn("'hash$with$dollars'",env)
+        self.assertIn('PANEL_EXTRA_HOSTS=old.example.com',env)
+        self.assertEqual(n.load_config()['endpoint'],'panel.example.com')
+        self.assertIn('old.example.com, panel.example.com',self.caddy.read_text())
+        self.assertEqual(json.loads((self.root/'settings-state.json').read_text())['status'],'completed')
+        self.assertEqual(n.wait_tls.call_args_list[-1].kwargs,{'http':True})
+        n.restart_vpn.assert_not_called()
+
+    def test_failed_tls_rolls_back_host_endpoint_and_caddy(self):
+        original={k:p.read_bytes() for k,p in n.paths().items()}
+        n.queue(dict(operation='ssl-save',domain='new.example.com',use_for_vpn=True))
+        n.wait_tls.side_effect=RuntimeError('certificate not issued')
+        n.apply_pending()
+        for key,path in n.paths().items(): self.assertEqual(path.read_bytes(),original[key])
+        self.assertEqual(json.loads((self.root/'settings-state.json').read_text())['status'],'failed')
+        self.assertFalse((self.root/'settings-pending.json').exists())
+
+    def test_failed_vpn_start_rolls_back_protocol(self):
+        n.queue(dict(operation='vpn-save',protocol='tcp',endpoint='vpn.example.com'))
+        n.restart_vpn.side_effect=[RuntimeError('bind failed'),None]
+        n.apply_pending()
+        self.assertIn('proto udp4',self.server.read_text())
+        self.assertEqual(n.load_config()['protocol'],'udp')
+        self.assertEqual(json.loads((self.root/'settings-state.json').read_text())['error'],'apply_failed')
+
+    def test_cli_rollback_restores_previous_settings_and_cancels_pending(self):
+        n.queue(dict(operation='vpn-save',protocol='tcp',endpoint='new.example.com'))
+        n.apply_pending()
+        (self.root/'settings-pending.json').write_text('{}')
+        n.rollback()
+        self.assertEqual(n.load_config()['endpoint'],'192.0.2.1')
+        self.assertEqual(n.load_config()['protocol'],'udp')
+        self.assertFalse((self.root/'settings-pending.json').exists())
+        self.assertEqual(json.loads((self.root/'settings-state.json').read_text())['status'],'rolled_back')
+
+    def test_bootstrap_does_not_claim_unrelated_caddy(self):
+        (self.root/'caddy-owned').unlink()
+        self.caddy.write_text('other.example.com { reverse_proxy localhost:9999 }')
+        n.bootstrap()
+        self.assertFalse((self.root/'caddy-owned').exists())
+        with self.assertRaises(ValueError): n.queue(dict(operation='ssl-save',domain='panel.example.com',use_for_vpn=True))
+        self.caddy.write_text('old.example.com {\n tls internal\n reverse_proxy 127.0.0.1:8000\n}')
+        n.bootstrap()
+        self.assertTrue((self.root/'caddy-owned').exists())

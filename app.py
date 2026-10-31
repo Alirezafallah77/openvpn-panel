@@ -35,6 +35,9 @@ def create_app(config=None):
     )
     if os.environ.get('PANEL_HOST'):
         app.config['TRUSTED_HOSTS'] = [os.environ['PANEL_HOST']]
+        for host in os.environ.get('PANEL_EXTRA_HOSTS','').split(','):
+            if host and re.fullmatch(r'[A-Za-z0-9.-]{1,253}',host):
+                app.config['TRUSTED_HOSTS'].append(host)
     if os.environ.get('PANEL_LOCAL_HTTP') == '1':
         app.config['SESSION_COOKIE_SECURE'] = False
     if config:
@@ -202,6 +205,42 @@ def create_app(config=None):
     def confirm_password():
         if not check_password_hash(app.config['ADMIN_PASSWORD_HASH'], request.form.get('password', '')):
             abort(403)
+
+    @app.get('/settings/network')
+    @admin
+    def network_page():
+        return render_template('network.html', settings=privileged(dict(operation='network-settings-get')))
+
+    @app.post('/settings/ssl')
+    @admin
+    def ssl_settings():
+        from vpn.network_settings import domain
+        confirm_password()
+        if request.form.get('confirm') != '1':
+            abort(400)
+        try:
+            host = domain(request.form.get('domain',''))
+        except ValueError:
+            abort(400, description='دامنهٔ معتبر بدون https، مسیر یا پورت وارد کنید.')
+        privileged(dict(operation='ssl-save',domain=host,use_for_vpn=request.form.get('use_for_vpn')=='1'))
+        app.logger.info('Admin queued SSL settings change')
+        return render_template('network_pending.html', target='https://'+host)
+
+    @app.post('/settings/vpn')
+    @admin
+    def vpn_settings():
+        from vpn.network_settings import protocol, endpoint
+        confirm_password()
+        if request.form.get('confirm') != '1':
+            abort(400)
+        try:
+            chosen = protocol(request.form.get('protocol',''))
+            remote = endpoint(request.form.get('endpoint',''))
+        except ValueError:
+            abort(400, description='پروتکل یا آدرس VPN معتبر نیست.')
+        privileged(dict(operation='vpn-save',protocol=chosen,endpoint=remote))
+        app.logger.info('Admin queued VPN settings change')
+        return render_template('network_pending.html', target=None)
 
     @app.get('/backups')
     @admin

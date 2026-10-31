@@ -79,6 +79,12 @@ jobs:
           echo 'PANEL_TEST_BASE=https://panel.example.invalid' >> "$GITHUB_ENV"
           echo 'PANEL_TEST_CA=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt' >> "$GITHUB_ENV"
           sudo curl --fail --retry 10 --retry-delay 1 --retry-connrefused --cacert /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt https://panel.example.invalid/login --noproxy '*' > /dev/null
+      - name: Trust private CI certificate for root SSL Management checks
+        if: matrix.mode == 'https'
+        run: |
+          # Only the ephemeral runner trusts this private CA; production uses OS roots.
+          sudo systemctl set-environment SSL_CERT_FILE=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+          sudo systemctl restart openvpn-panel-pki
       - name: Test real VPN and quota enforcement
         run: |
           set -o pipefail

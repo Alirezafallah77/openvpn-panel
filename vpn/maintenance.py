@@ -170,6 +170,13 @@ def control_web(action):
 
 def dispatch(message):
     operation = message.get('operation')
+    if operation in ('network-settings-get','ssl-save','vpn-save'):
+        from vpn import network_settings
+        if operation == 'network-settings-get' and set(message) == {'operation'}:
+            return network_settings.public_settings()
+        if operation in ('ssl-save','vpn-save'):
+            return network_settings.queue(message)
+        raise ValueError('Invalid network settings fields')
     if operation == 'backup-settings-get' and set(message) == {'operation'}:
         return public_settings()
     if operation == 'backup-settings-save':

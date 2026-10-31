@@ -101,3 +101,12 @@ extendedKeyUsage=clientAuth
         self.assertFalse((self.pki / 'client-alice.rotation-pending').exists())
         self.assertNotEqual(self.verify(old_cert), 0)
         self.assertEqual(self.verify(self.pki / 'client-alice.crt'), 0)
+
+    def test_profiles_use_configured_dns_and_tcp_client_protocol(self):
+        (self.root/'vpn.json').write_text('{"endpoint":"vpn.example.com","port":1194,"protocol":"tcp"}')
+        result=profile('alice',root=self.root)
+        self.assertIn('proto tcp4-client\n',result)
+        self.assertIn('remote vpn.example.com 1194\n',result)
+        (self.root/'vpn.json').write_text('{"endpoint":"vpn.example.com","port":1194,"protocol":"udp"}')
+        result=profile('alice',root=self.root)
+        self.assertIn('proto udp4\n',result)

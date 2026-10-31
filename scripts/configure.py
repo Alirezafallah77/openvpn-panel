@@ -99,7 +99,7 @@ authorityKeyIdentifier = keyid,issuer
         '-extensions', 'server_cert', '-in', str(pki / 'server.csr'), '-out', str(pki / 'server.crt'))
     cmd('openssl', 'ca', '-batch', '-config', str(pki / 'openssl.cnf'), '-gencrl', '-out', str(ROOT / 'crl.pem'))
     cmd('openvpn', '--genkey', 'secret', str(ROOT / 'tls-crypt.key'))
-    write(ROOT / 'vpn.json', json.dumps(dict(endpoint=endpoint, port=1194)))
+    write(ROOT / 'vpn.json', json.dumps(dict(endpoint=endpoint, port=1194, protocol='udp')))
     write('/etc/openvpn/server/panel.conf', f'''port 1194
 proto udp4
 dev tun-panel

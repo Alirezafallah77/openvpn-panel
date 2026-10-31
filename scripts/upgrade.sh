@@ -11,6 +11,15 @@ STAMP=$(date -u +%Y%m%dT%H%M%SZ)-$$
 install -d -m 0700 /var/backups/openvpn-panel
 /usr/local/sbin/openvpn-panelctl backup "/var/backups/openvpn-panel/before-upgrade-$STAMP.tar.gz"
 tar --exclude=.venv --exclude=__pycache__ -czf "/var/backups/openvpn-panel/code-before-$STAMP.tar.gz" -C /opt openvpn-panel
+CADDY_NEW=0
+if ! command -v caddy >/dev/null; then
+  CADDY_NEW=1
+  systemctl mask --runtime caddy.service
+  trap 'systemctl unmask --runtime caddy.service >/dev/null 2>&1 || true' EXIT
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update
+  apt-get install -y caddy
+fi
 # Dependency installation before downtime; versions of existing libraries stay pinned.
 /opt/openvpn-panel/.venv/bin/pip install -r "$SOURCE/requirements.txt"
 chmod -R a+rX /opt/openvpn-panel/.venv
@@ -31,6 +40,11 @@ install -m 0755 "$SOURCE/scripts/panelctl.py" /usr/local/sbin/openvpn-panelctl
 install -m 0644 "$SOURCE"/deploy/*.service "$SOURCE"/deploy/*.timer /etc/systemd/system/
 install -m 0644 "$SOURCE/deploy/openvpn-override.conf" /etc/systemd/system/openvpn-server@panel.service.d/panel.conf
 systemctl daemon-reload
+/opt/openvpn-panel/.venv/bin/python -Es -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from vpn.network_settings import bootstrap; bootstrap(bool(int(sys.argv[1])))" "$CADDY_NEW"
+if [[ $CADDY_NEW == 1 ]]; then
+  systemctl unmask --runtime caddy.service
+  systemctl disable --now caddy.service
+fi
 /usr/local/sbin/openvpn-panelctl restart
 systemctl enable --now openvpn-panel-backup.timer
 for service in openvpn-panel openvpn-panel-pki openvpn-panel-accounting openvpn-server@panel; do

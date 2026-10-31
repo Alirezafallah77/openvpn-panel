@@ -145,6 +145,44 @@ def main():
         Path('/tmp/e2e.ovpn').write_bytes(new_profile)
         client = start_client()
         wait_for(connected, 'replacement certificate connects')
+        # SSL Management checks an already-trusted test certificate. Real ACME
+        # issuance for a newly owned public DNS name cannot run on this runner.
+        if BASE.startswith('https:'):
+            host=urllib.parse.urlsplit(BASE).hostname
+            post('/settings/ssl',dict(password=PASSWORD,confirm='1',domain=host,use_for_vpn='1'))
+            def completed(operation):
+                state=json.loads(Path('/etc/openvpn-panel/settings-state.json').read_text())
+                if state.get('status')=='failed':
+                    raise AssertionError('Settings job failed: '+state.get('error','unknown'))
+                return state.get('status')=='completed' and state.get('operation')==operation
+            wait_for(lambda: completed('ssl-save'),'SSL Management verifies HTTPS and commits domain',timeout=130)
+            configured=post('/users/e2e/profile',{})
+            assert ('remote '+host+' 1194').encode() in configured
+            print('PASS: SSL domain appears in newly downloaded profiles',flush=True)
+        def completed_vpn():
+            state=json.loads(Path('/etc/openvpn-panel/settings-state.json').read_text())
+            if state.get('status')=='failed':
+                raise AssertionError('VPN settings job failed: '+state.get('error','unknown'))
+            return state.get('status')=='completed' and state.get('operation')=='vpn-save'
+        with Path('/etc/hosts').open('a') as hosts:
+            hosts.write('\n192.0.2.1 vpn.example.invalid\n')
+        activation=q.status('e2e').first_connected
+        for chosen in ('tcp','udp'):
+            client.terminate()
+            client.wait(timeout=10)
+            post('/settings/vpn',dict(password=PASSWORD,confirm='1',protocol=chosen,endpoint='vpn.example.invalid'))
+            wait_for(completed_vpn,'VPN protocol applied: '+chosen,timeout=60)
+            configured=post('/users/e2e/profile',{})
+            expected=b'proto tcp4-client' if chosen=='tcp' else b'proto udp4'
+            assert expected in configured and b'remote vpn.example.invalid 1194' in configured
+            Path('/tmp/e2e.ovpn').write_bytes(configured)
+            client=start_client()
+            wait_for(connected,'real '+chosen.upper()+' connection through configured DNS endpoint')
+            assert q.status('e2e').first_connected==activation
+            cmd('ip','netns','exec','ovp-test','curl','--noproxy','*','--fail','--max-time','25',
+                '--retry','2','--retry-all-errors','--resolve',f'github.com:443:{github_ip}',
+                '--output','/tmp/vpn-protocol-proof.txt','https://github.com/robots.txt')
+        print('PASS: UDP/TCP switching preserves users and serves internet on both transports',flush=True)
         # Web-managed encryption; no real Telegram token or public bot required.
         migration_password = 'migration-test-passphrase-123'
         post('/backups/settings', dict(password=PASSWORD, interval='15', enabled='0',

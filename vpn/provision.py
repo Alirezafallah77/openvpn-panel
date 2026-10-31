@@ -23,13 +23,17 @@ def profile(name, action='download', root=ROOT):
         raise ValueError('invalid name')
     if action not in ('download', 'rotate'):
         raise ValueError('invalid action')
-    conf = json.loads((root / 'vpn.json').read_text())
     with sqlite3.connect('file:/var/lib/openvpn-panel/quota.sqlite?mode=ro', uri=True) as db:
         if not db.execute('SELECT 1 FROM users WHERE name=?', (name,)).fetchone():
             raise ValueError('unknown user')
     pki = root / 'pki'
     with (pki / 'lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        conf = json.loads((root / 'vpn.json').read_text())
+        chosen = conf.get('protocol','udp')
+        if chosen not in ('udp','tcp'):
+            raise ValueError('invalid protocol')
+        transport = 'udp4' if chosen == 'udp' else 'tcp4-client'
         base = pki / ('client-' + name)
         key, csr, cert = (Path(str(base) + ext) for ext in ('.key', '.csr', '.crt'))
         config = str(pki / 'openssl.cnf')
@@ -62,7 +66,7 @@ def profile(name, action='download', root=ROOT):
         tls = (root / 'tls-crypt.key').read_text()
         return f'''client
  dev tun
- proto udp4
+ proto {transport}
  remote {conf['endpoint']} {conf['port']}
  resolv-retry infinite
  nobind
