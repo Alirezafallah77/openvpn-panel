@@ -26,10 +26,11 @@ chmod -R a+rX /opt/openvpn-panel/.venv
 systemctl stop openvpn-panel-backup.timer openvpn-panel-backup.service 2>/dev/null || true
 systemctl stop openvpn-server@panel openvpn-panel-accounting openvpn-panel openvpn-panel-pki
 trap 'echo "Upgrade interrupted. Private rollback archives are in /var/backups/openvpn-panel. Inspect journals before starting services." >&2' ERR
-for file in app.py quota.py hook_entry.py collector_entry.py broker_entry.py scheduler_entry.py metrics.py requirements.txt; do
+for file in app.py quota.py hook_entry.py collector_entry.py broker_entry.py scheduler_entry.py metrics.py panel_web.py i18n.py requirements.txt; do
   install -m 0644 "$SOURCE/$file" /opt/openvpn-panel/
 done
-for dir in vpn templates static; do
+for dir in vpn templates static locales; do
+  install -d -m 0755 "/opt/openvpn-panel/$dir"
   cp -r "$SOURCE/$dir/." "/opt/openvpn-panel/$dir/"
 done
 chown -R root:root /opt/openvpn-panel

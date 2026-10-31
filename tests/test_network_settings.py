@@ -29,6 +29,56 @@ class NetworkSettingsTests(unittest.TestCase):
         for p in reversed(self.patches): p.stop()
         self.temp.cleanup()
 
+    def test_panel_port_prefix_transaction_preserves_vpn_and_public_aliases(self):
+        original_server=self.server.read_text()
+        original_vpn=(self.root/'vpn.json').read_text()
+        n.queue(dict(operation='panel-save',public_port=5000,admin_path='/private'))
+        n.apply_pending()
+        self.assertEqual(n.read_json(self.root/'settings-state.json',{})['status'],'completed')
+        env=n.environment()
+        self.assertEqual(env['PANEL_PUBLIC_PORT'],'5000')
+        self.assertEqual(env['PANEL_ADMIN_PATH'],'/private')
+        self.assertEqual(env['PANEL_OLD_PUBLIC_PORTS'],'443')
+        self.assertEqual(env['PANEL_SECRET'],'keep-secret')
+        self.assertEqual(self.server.read_text(),original_server)
+        self.assertEqual((self.root/'vpn.json').read_text(),original_vpn)
+        n.restart_vpn.assert_not_called()
+        n.wait_tls.assert_any_call('old.example.com',http=True,port=5000,prefix='/private')
+        caddy=self.caddy.read_text()
+        self.assertIn('old.example.com:5000 {',caddy)
+        self.assertIn('@public path /s/* /static/* /preferences',caddy)
+        self.assertIn('respond 404',caddy)
+        # Change back to a retained port; do not create duplicate site blocks.
+        n.queue(dict(operation='panel-save',public_port=443,admin_path='/other'))
+        n.apply_pending()
+        self.assertEqual(n.environment()['PANEL_OLD_PUBLIC_PORTS'],'5000')
+        self.assertEqual(self.caddy.read_text().count('old.example.com {'),1)
+
+    def test_panel_failed_health_check_restores_environment_and_caddy(self):
+        before_env=(self.root/'panel.env').read_text()
+        before_caddy=self.caddy.read_text()
+        n.queue(dict(operation='panel-save',public_port=5000,admin_path='/private'))
+        n.wait_tls.side_effect=[None,n.SettingsFailure('panel_https')]
+        n.apply_pending()
+        result=n.read_json(self.root/'settings-state.json',{})
+        self.assertEqual(result['status'],'failed')
+        self.assertEqual(result['error'],'apply_failed')
+        self.assertEqual(result['diagnostic'],'panel_https')
+        self.assertEqual((self.root/'panel.env').read_text(),before_env)
+        self.assertEqual(self.caddy.read_text(),before_caddy)
+        n.restart_vpn.assert_not_called()
+
+    def test_panel_validation_ssl_requirement_and_port_conflict(self):
+        for port in (1194,8000,2019,80,65536,True):
+            with self.assertRaises(ValueError): n.queue(dict(operation='panel-save',public_port=port,admin_path=''))
+        (self.root/'panel.env').write_text('PANEL_LOCAL_HTTP=1\nPANEL_SECRET=keep-secret\n')
+        with self.assertRaises(ValueError): n.queue(dict(operation='panel-save',public_port=5000,admin_path=''))
+        n.queue(dict(operation='panel-save',public_port=443,admin_path='/ssh-panel'))
+        with patch.object(n,'wait_local_login') as check:
+            n.apply_pending()
+            check.assert_called_once_with('/ssh-panel')
+        self.assertEqual(n.environment()['PANEL_ADMIN_PATH'],'/ssh-panel')
+
     def test_strict_domain_endpoint_protocol_validation(self):
         self.assertEqual(n.domain(' PANEL.Example.com. '),'panel.example.com')
         self.assertEqual(n.endpoint('192.0.2.1'),'192.0.2.1')

@@ -17,6 +17,8 @@ import ssl
 import subprocess
 import time
 import uuid
+import urllib.request
+from panel_web import admin_path, public_port
 from vpn.maintenance import atomic_json, read_json
 
 ROOT = Path('/etc/openvpn-panel')
@@ -155,12 +157,15 @@ def bootstrap(allow_default=False):
     atomic_json(ROOT/'vpn.json', conf)
 
 
-def probe_tls(host, timeout=2):
+def probe_tls(host, timeout=2, port=None, prefix=None):
     """Verify hostname/chain over loopback; never connect to a user-supplied IP."""
     try:
         host = domain(host)
+        env=environment()
+        port=public_port(env.get('PANEL_PUBLIC_PORT','443')) if port is None else public_port(port)
+        prefix=admin_path(env.get('PANEL_ADMIN_PATH','')) if prefix is None else admin_path(prefix)
         context = ssl.create_default_context()
-        with socket.create_connection(('127.0.0.1',443), timeout=timeout) as raw:
+        with socket.create_connection(('127.0.0.1',port), timeout=timeout) as raw:
             with context.wrap_socket(raw, server_hostname=host) as secure:
                 certificate = secure.getpeercert()
                 result = dict(valid=True, expires=int(ssl.cert_time_to_seconds(certificate['notAfter'])),
@@ -168,7 +173,7 @@ def probe_tls(host, timeout=2):
                     http_ok=False)
                 # An HTTP timeout must not erase a successfully verified TLS chain.
                 try:
-                    secure.sendall(f'GET /login HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n'.encode('ascii'))
+                    secure.sendall(f'GET {prefix}/login HTTP/1.1\r\nHost: {host}:{port}\r\nConnection: close\r\n\r\n'.encode('ascii'))
                     line = b''
                     while b'\r\n' not in line and len(line) < 4096:
                         data = secure.recv(512)
@@ -185,7 +190,7 @@ def probe_tls(host, timeout=2):
 def public_settings():
     conf, host = load_config(), current_domain()
     return dict(endpoint=conf['endpoint'], protocol=conf['protocol'], port=conf['port'],
-                domain=host, caddy_managed=(ROOT/'caddy-owned').is_file(),
+                domain=host, public_port=int(environment().get('PANEL_PUBLIC_PORT','443')), admin_path=environment().get('PANEL_ADMIN_PATH',''), caddy_managed=(ROOT/'caddy-owned').is_file(),
                 caddy_installed=bool(shutil.which('caddy')),
                 tls=probe_tls(host, timeout=1) if host else dict(valid=False, expires=None,issuer='',http_ok=False),
                 job=read_json(ROOT/'settings-state.json', {}))
@@ -197,6 +202,13 @@ def queue(message):
         request = dict(operation=op, domain=domain(message['domain']), use_for_vpn=message['use_for_vpn'])
         if type(request['use_for_vpn']) is not bool or not (ROOT/'caddy-owned').is_file() or not shutil.which('caddy'):
             raise ValueError('Caddy is not managed by this installation')
+    elif op == 'panel-save' and set(message)=={'operation','public_port','admin_path'}:
+        chosen=public_port(message['public_port'])
+        if chosen==int(load_config()['port']): raise ValueError('Port conflicts with OpenVPN')
+        if not current_domain() and chosen!=int(environment().get('PANEL_PUBLIC_PORT','443')):
+            raise ValueError('Enable SSL before changing the public HTTPS port')
+        if current_domain() and not (ROOT/'caddy-owned').is_file(): raise ValueError('Unmanaged Caddy')
+        request=dict(operation=op,public_port=chosen,admin_path=admin_path(message['admin_path']))
     elif op == 'vpn-save' and set(message) == {'operation','protocol','endpoint'}:
         request = dict(operation=op, protocol=protocol(message['protocol']), endpoint=endpoint(message['endpoint']))
     else:
@@ -283,14 +295,83 @@ def caddy_apply(saved):
         raise SettingsFailure('caddy_start') from error
 
 
-def wait_tls(host, http=False):
+def wait_tls(host, http=False, **options):
     end = time.monotonic()+(HTTP_TIMEOUT if http else TLS_TIMEOUT)
     while time.monotonic() < end:
-        result = probe_tls(host)
+        result = probe_tls(host,**options)
         if result['valid'] and (not http or result['http_ok']):
             return result
         time.sleep(2)
     raise SettingsFailure('panel_https' if http else 'tls_certificate')
+
+
+def old_ports():
+    text=environment().get('PANEL_OLD_PUBLIC_PORTS','')
+    return [public_port(p) for p in text.split(',') if p]
+
+
+def render_caddy(hosts, port, aliases, internal=False):
+    """Old ports serve only existing public subscriptions, never admin routes."""
+    hosts=[domain(h) for h in hosts]
+    tls='    tls internal\n' if internal else ''
+    def addresses(p): return ', '.join(h+(':'+str(p) if p!=443 else '') for h in hosts)
+    text='# OpenVPN Panel web access v1\n'+addresses(port)+' {\n'+tls+'    reverse_proxy 127.0.0.1:8000\n}\n'
+    for p in aliases:
+        if p==port: continue
+        text+=addresses(p)+' {\n'+tls+'    @public path /s/* /static/* /preferences\n    handle @public {\n        reverse_proxy 127.0.0.1:8000\n    }\n    handle {\n        respond 404\n    }\n}\n'
+    return text
+
+
+def wait_local_login(prefix):
+    end=time.monotonic()+HTTP_TIMEOUT
+    host=environment().get('PANEL_HOST','localhost')
+    opener=urllib.request.build_opener(urllib.request.ProxyHandler({}))
+    while time.monotonic()<end:
+        try:
+            req=urllib.request.Request('http://127.0.0.1:8000'+prefix+'/login',headers={'Host':host})
+            with opener.open(req,timeout=2) as response:
+                if response.status==200: return
+        except OSError: pass
+        time.sleep(1)
+    raise SettingsFailure('panel_https')
+
+
+def apply_panel(request,saved):
+    env=environment()
+    host=current_domain()
+    port=public_port(request['public_port'])
+    prefix=admin_path(request['admin_path'])
+    previous=public_port(env.get('PANEL_PUBLIC_PORT','443'))
+    aliases=list(dict.fromkeys(old_ports()+([previous] if previous!=port else [])))
+    aliases=[p for p in aliases if p!=port]
+    if len(aliases)>8: raise ValueError('Too many retained public ports; inspect from SSH')
+    if host:
+        if not (ROOT/'caddy-owned').is_file(): raise ValueError('Unmanaged Caddy')
+        stage('caddy')
+        if port!=previous:
+            text=CADDY.read_text()
+            if not (text.startswith('# OpenVPN Panel web access v1') or managed_caddy(text,host)):
+                # Our SSL switch may have preserved a former HTTPS hostname.
+                compact=re.sub(r'\s+','',re.sub(r'#.*','',text))
+                if not re.fullmatch(r'[a-z0-9.,:-]+\{(?:tlsinternal)?reverse_proxy127\.0\.0\.1:8000\}',compact):
+                    raise ValueError('Caddy config is not a supported managed template')
+            hosts=[host]+[h for h in env.get('PANEL_EXTRA_HOSTS','').split(',') if h not in ('localhost','127.0.0.1','',host)]
+            write(CADDY,render_caddy(hosts,port,aliases,internal=bool(re.search(r'^\s*tls internal\s*$',text,re.M))),0o644)
+        caddy_apply(saved)
+        wait_tls(host,port=port,prefix=env.get('PANEL_ADMIN_PATH',''))
+    elif port!=previous: raise ValueError('SSL required')
+    with (ROOT/'pki/lock').open('a') as lock:
+        fcntl.flock(lock,fcntl.LOCK_EX)
+        lines=[line for line in (ROOT/'panel.env').read_text().splitlines() if not line.startswith(('PANEL_PUBLIC_PORT=','PANEL_ADMIN_PATH=','PANEL_OLD_PUBLIC_PORTS='))]
+        lines+=['PANEL_PUBLIC_PORT='+str(port),'PANEL_ADMIN_PATH='+prefix,'PANEL_OLD_PUBLIC_PORTS='+','.join(map(str,aliases))]
+        write(ROOT/'panel.env','\n'.join(lines)+'\n')
+        stage('web_restart')
+        restart_web()
+    if host:
+        stage('https_check')
+        wait_tls(host,http=True,port=port,prefix=prefix)
+        systemctl('enable','caddy.service')
+    else: wait_local_login(prefix)
 
 
 def apply_ssl(request, saved):
@@ -301,7 +382,7 @@ def apply_ssl(request, saved):
     # supports an administrator-installed private CA without silently replacing it.
     if old != host or not CADDY.is_file():
         hosts = ', '.join(dict.fromkeys([h for h in (old,host) if h]))
-        write(CADDY, hosts+' {\n    reverse_proxy 127.0.0.1:8000\n}\n',0o644)
+        write(CADDY, render_caddy(hosts.split(', '),int(environment().get('PANEL_PUBLIC_PORT','443')),old_ports()),0o644)
     stage('caddy')
     caddy_apply(saved)
     stage('certificate')
@@ -345,13 +426,14 @@ def apply_vpn(request):
 def apply_pending():
     with locked():
         request = read_json(ROOT/'settings-pending.json',{})
-        if request.get('operation') not in ('ssl-save','vpn-save'):
+        if request.get('operation') not in ('ssl-save','vpn-save','panel-save'):
             raise ValueError('No queued settings change')
         operation = request['operation']
         atomic_json(ROOT/'settings-state.json',dict(status='running',operation=operation,job_id=request['job_id'],updated_at=int(time.time())))
         saved = snapshot()
         try:
             if operation=='ssl-save': apply_ssl(request,saved)
+            elif operation=='panel-save': apply_panel(request,saved)
             else: apply_vpn(request)
         except Exception as failure:
             diagnostic = failure.code if isinstance(failure, SettingsFailure) else 'unexpected'
@@ -363,7 +445,7 @@ def apply_pending():
                     fcntl.flock(lock,fcntl.LOCK_EX)
                     restore_files(saved)
                     systemctl('enable' if saved['caddy_enabled'] else 'disable','caddy.service')
-                    if operation=='ssl-save':
+                    if operation in ('ssl-save','panel-save'):
                         if saved['caddy_active']: caddy_apply(saved)
                         else: systemctl('stop','caddy.service')
                         restart_web()

@@ -1,6 +1,7 @@
 'use strict';
 // Loaded before CSS to avoid a light/dark flash. Store only the visual preference.
 (() => {
+  const T = window.panelT || (value => value);
   const root = document.documentElement;
   let manual = null;
   let system = null;
@@ -16,8 +17,8 @@
     if (document.body) document.body.dataset.theme = theme;
     const button = document.querySelector('[data-theme-toggle]');
     if (button) {
-      button.textContent = theme === 'dark' ? '☀ حالت روشن' : '☾ حالت تیره';
-      button.setAttribute('aria-label', theme === 'dark' ? 'فعال‌کردن پوستهٔ روشن' : 'فعال‌کردن پوستهٔ تیره');
+      button.textContent = theme === 'dark' ? T('☀ حالت روشن') : T('☾ حالت تیره');
+      button.setAttribute('aria-label', theme === 'dark' ? T('فعال‌کردن پوستهٔ روشن') : T('فعال‌کردن پوستهٔ تیره'));
     }
   }
   const preferred = () => manual || (system && system.matches ? 'dark' : 'light');

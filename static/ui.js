@@ -1,4 +1,5 @@
 'use strict';
+const T = window.panelT || (value => value);
 document.querySelectorAll('[role="tablist"]').forEach(list => {
   const tabs = Array.from(list.querySelectorAll('[role="tab"]'));
   function select(tab, focus) {
@@ -29,10 +30,10 @@ document.querySelectorAll('[data-copy]').forEach(button => {
     const status = document.getElementById(button.dataset.feedback);
     try {
       await navigator.clipboard.writeText(input.value);
-      status.textContent = 'لینک کپی شد؛ آمادهٔ ارسال است.';
+      status.textContent = T('لینک کپی شد؛ آمادهٔ ارسال است.');
     } catch (_) {
       input.focus(); input.select();
-      status.textContent = 'لینک انتخاب شد؛ با Copy یا Ctrl+C کپی کنید.';
+      status.textContent = T('لینک انتخاب شد؛ با Copy یا Ctrl+C کپی کنید.');
     }
   });
 });
@@ -50,7 +51,7 @@ document.querySelectorAll('[data-create-user]').forEach(form => {
     if (busy) return;
     busy = true; submit.disabled = true;
     form.setAttribute('aria-busy', 'true');
-    status.textContent = 'در حال ساخت کاربر…';
+    status.textContent = T('در حال ساخت کاربر…');
     error.hidden = true;
     try {
       const response = await fetch(form.action, {
@@ -58,37 +59,37 @@ document.querySelectorAll('[data-create-user]').forEach(form => {
         headers: {'Accept': 'application/json'}
       });
       if (response.redirected || !response.headers.get('Content-Type')?.includes('application/json')) {
-        throw new Error('پاسخ قابل تأیید نیست؛ ممکن است نشست ورود تمام شده باشد. پیش از تلاش دوباره، داشبورد را در تب دیگری بررسی کنید؛ احتمال دارد کاربر ساخته شده باشد.');
+        throw new Error(T('پاسخ قابل تأیید نیست؛ ممکن است نشست ورود تمام شده باشد. پیش از تلاش دوباره، داشبورد را در تب دیگری بررسی کنید؛ احتمال دارد کاربر ساخته شده باشد.'));
       }
       const data = await response.json();
-      if (!response.ok) throw new Error(data.error || 'ساخت کاربر ناموفق بود.');
-      if (typeof data.name !== 'string' || typeof data.subscription_url !== 'string') throw new Error('پاسخ ساخت ناقص است؛ فهرست کاربران را قبل از تلاش دوباره بررسی کنید.');
+      if (!response.ok) throw new Error(data.error || T('ساخت کاربر ناموفق بود.'));
+      if (typeof data.name !== 'string' || typeof data.subscription_url !== 'string') throw new Error(T('پاسخ ساخت ناقص است؛ فهرست کاربران را قبل از تلاش دوباره بررسی کنید.'));
       count += 1;
       const card = document.createElement('article'); card.className = 'created-user';
       const heading = document.createElement('h3'); heading.textContent = '✓ ' + data.name;
       const input = document.createElement('input'); input.readOnly = true; input.dir = 'ltr';
       input.className = 'share-input'; input.value = data.subscription_url;
-      input.setAttribute('aria-label', 'لینک اشتراک ' + data.name);
-      const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'secondary'; copy.textContent = 'کپی لینک اشتراک';
+      input.setAttribute('aria-label', T('لینک اشتراک ') + data.name);
+      const copy = document.createElement('button'); copy.type = 'button'; copy.className = 'secondary'; copy.textContent = T('کپی لینک اشتراک');
       const feedback = document.createElement('p'); feedback.setAttribute('role', 'status');
       copy.addEventListener('click', async () => {
-        try { await navigator.clipboard.writeText(input.value); feedback.textContent = 'لینک کپی شد.'; }
-        catch (_) { input.focus(); input.select(); feedback.textContent = 'لینک انتخاب شد؛ با Copy یا Ctrl+C کپی کنید.'; }
+        try { await navigator.clipboard.writeText(input.value); feedback.textContent = T('لینک کپی شد.'); }
+        catch (_) { input.focus(); input.select(); feedback.textContent = T('لینک انتخاب شد؛ با Copy یا Ctrl+C کپی کنید.'); }
       });
-      const open = document.createElement('a'); open.href = data.subscription_url; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = 'مشاهدهٔ اشتراک ↗';
+      const open = document.createElement('a'); open.href = data.subscription_url; open.target = '_blank'; open.rel = 'noopener noreferrer'; open.textContent = T('مشاهدهٔ اشتراک ↗');
       card.append(heading, input, copy, open, feedback);
       if (data.profile_url) {
         const download = document.createElement('form'); download.method = 'post'; download.action = data.profile_url;
         const csrf = document.createElement('input'); csrf.type = 'hidden'; csrf.name = 'csrf'; csrf.value = form.elements.csrf.value;
-        const button = document.createElement('button'); button.textContent = 'دانلود فایل اتصال';
+        const button = document.createElement('button'); button.textContent = T('دانلود فایل اتصال');
         download.append(csrf, button); card.append(download);
       }
       results.prepend(card);
-      status.textContent = count + ' کاربر در این صفحه ساخته شد. لینک را کپی کنید یا نام کاربر بعدی را بنویسید.';
+      status.textContent = count + T(' کاربر در این صفحه ساخته شد. لینک را کپی کنید یا نام کاربر بعدی را بنویسید.');
       form.elements.name.value = ''; form.elements.name.focus();
     } catch (failure) {
       status.textContent = '';
-      error.textContent = failure instanceof TypeError ? 'ارتباط قطع شد؛ نتیجه نامشخص است. قبل از ارسال مجدد، فهرست کاربران را در تب دیگری بررسی کنید. لینک را با تکرار درخواست نمی‌توان بازیابی کرد.' : failure.message;
+      error.textContent = failure instanceof TypeError ? T('ارتباط قطع شد؛ نتیجه نامشخص است. قبل از ارسال مجدد، فهرست کاربران را در تب دیگری بررسی کنید. لینک را با تکرار درخواست نمی‌توان بازیابی کرد.') : failure.message;
       error.hidden = false;
     } finally {
       busy = false; submit.disabled = false; form.removeAttribute('aria-busy');
@@ -118,15 +119,15 @@ if (liveMetrics) {
         const card = liveMetrics.querySelector('[data-metric="' + key + '"]');
         const value = data[key];
         const valid = typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
-        card.querySelector('[data-metric-value]').textContent = !valid ? 'نامشخص' : key === 'swap' && data.swap_total === 0 ? 'بدون Swap' : value.toFixed(1) + '%';
+        card.querySelector('[data-metric-value]').textContent = !valid ? T('نامشخص') : key === 'swap' && data.swap_total === 0 ? T('بدون Swap') : value.toFixed(1) + '%';
         const bar = card.querySelector('progress');
         bar.hidden = !valid;
         if (valid) bar.value = value;
         if (key !== 'cpu') card.querySelector('.metric-detail').textContent = gib(data[key + '_used']) + ' / ' + gib(data[key + '_total']) + ' GiB';
       }
-      status.textContent = data.cpu === null ? 'خواندن CPU ناموفق است؛ آمار CPU نامشخص است.' : 'آمار منابع به‌روز است؛ بروزرسانی هر ۵ ثانیه.';
+      status.textContent = data.cpu === null ? T('خواندن CPU ناموفق است؛ آمار CPU نامشخص است.') : T('آمار منابع به‌روز است؛ بروزرسانی هر ۵ ثانیه.');
     } catch (_) {
-      status.textContent = 'آمار زنده در دسترس نیست؛ مقادیر قبلی ممکن است قدیمی باشند. اتصال و نشست ورود را بررسی کنید.';
+      status.textContent = T('آمار زنده در دسترس نیست؛ مقادیر قبلی ممکن است قدیمی باشند. اتصال و نشست ورود را بررسی کنید.');
     } finally {
       clearTimeout(timeout);
       pending = false;
@@ -149,22 +150,22 @@ document.querySelectorAll('[data-copy-user-link]').forEach(form => {
     try {
       async function send(url) {
         const response=await fetch(url,{method:'POST',body:new FormData(form),credentials:'same-origin',headers:{Accept:'application/json'}});
-        if (response.redirected || !response.headers.get('Content-Type')?.includes('application/json')) throw new Error('نشست یا پاسخ معتبر نیست؛ دوباره وارد پنل شوید.');
+        if (response.redirected || !response.headers.get('Content-Type')?.includes('application/json')) throw new Error(T('نشست یا پاسخ معتبر نیست؛ دوباره وارد پنل شوید.'));
         return {response,data:await response.json()};
       }
       let {response,data}=await send(form.action);
       if (response.status===409 && data.needs_rotation) {
-        if (!window.confirm('لینک این کاربر در نسخهٔ قدیمی فقط به‌صورت هش ذخیره شده است. لینک قبلی باطل و یک لینک جدید قابل کپی صادر شود؟ فایل VPN تغییر نمی‌کند.')) {
-          message.textContent='لغو شد؛ لینک قبلی تغییر نکرد.'; return;
+        if (!window.confirm(T('لینک این کاربر در نسخهٔ قدیمی فقط به‌صورت هش ذخیره شده است. لینک قبلی باطل و یک لینک جدید قابل کپی صادر شود؟ فایل VPN تغییر نمی‌کند.'))) {
+          message.textContent=T('لغو شد؛ لینک قبلی تغییر نکرد.'); return;
         }
         ({response,data}=await send(form.dataset.rotateUrl));
       }
-      if (!response.ok) throw new Error(data.error || 'دریافت لینک ناموفق بود.');
-      const input=document.createElement('input'); input.readOnly=true; input.dir='ltr';input.className='share-input';input.value=data.subscription_url;input.setAttribute('aria-label','لینک اشتراک');
+      if (!response.ok) throw new Error(data.error || T('دریافت لینک ناموفق بود.'));
+      const input=document.createElement('input'); input.readOnly=true; input.dir='ltr';input.className='share-input';input.value=data.subscription_url;input.setAttribute('aria-label',T('لینک اشتراک'));
       result.prepend(input);
-      try { await navigator.clipboard.writeText(input.value);message.textContent='لینک ساب کپی شد.'; }
-      catch (_) { input.focus();input.select();message.textContent='لینک انتخاب شد؛ با Copy یا Ctrl+C کپی کنید.'; }
-    } catch (_) { message.textContent='دریافت لینک ناموفق بود؛ نشست، ارتباط یا کلید ذخیرهٔ لینک را بررسی کنید. در خطای ارتباط بعد از صدور، دوباره کپی را بزنید؛ لینک جدید ذخیره شده و دوباره باطل نمی‌شود.'; }
+      try { await navigator.clipboard.writeText(input.value);message.textContent=T('لینک ساب کپی شد.'); }
+      catch (_) { input.focus();input.select();message.textContent=T('لینک انتخاب شد؛ با Copy یا Ctrl+C کپی کنید.'); }
+    } catch (_) { message.textContent=T('دریافت لینک ناموفق بود؛ نشست، ارتباط یا کلید ذخیرهٔ لینک را بررسی کنید. در خطای ارتباط بعد از صدور، دوباره کپی را بزنید؛ لینک جدید ذخیره شده و دوباره باطل نمی‌شود.'); }
     finally { button.disabled=false; }
   });
 });
@@ -186,9 +187,67 @@ if (userDialog && typeof userDialog.showModal==='function') {
       const content=userDialog.querySelector('[data-dialog-content]');
       content.replaceChildren(document.importNode(panel,true));
       content.querySelectorAll('[data-action-cancel]').forEach(cancel=>cancel.addEventListener('click',e=>{e.preventDefault();userDialog.close();}));
+      setupDatePickers(content);
       userDialog.showModal();
       content.querySelector('input:not([type=hidden])')?.focus();
     } catch (_) { window.location.assign(link.href); }
     finally { loading=false; }
   }));
 }
+
+// Accessible date picker: native selects use the selected calendar, while the
+// canonical text fallback still works without JS. Backend validates leap days.
+function setupDatePickers(root = document) {
+  root.querySelectorAll('[data-calendar-picker]').forEach(picker => {
+    if (picker.dataset.ready) return;
+    picker.dataset.ready = '1';
+    const input = picker.querySelector('[data-date-input]');
+    const year = picker.querySelector('[data-date-year]');
+    const month = picker.querySelector('[data-date-month]');
+    const day = picker.querySelector('[data-date-day]');
+    const parts = input.value.split('-').map(Number);
+    if (parts.length !== 3 || parts.some(v => !Number.isFinite(v))) return;
+    function option(select, value) {
+      const element = document.createElement('option');
+      element.value = String(value); element.textContent = String(value);
+      select.append(element);
+    }
+    for (let y = parts[0]-10; y <= parts[0]+10; y++) option(year,y);
+    for (let m = 1; m <= 12; m++) option(month,m);
+    year.value=String(parts[0]); month.value=String(parts[1]);
+    function daysInMonth() {
+      const y = Number(year.value), m = Number(month.value);
+      if (picker.dataset.calendar !== 'jalali') return new Date(Date.UTC(y,m,0)).getUTCDate();
+      if (m <= 6) return 31;
+      if (m <= 11) return 30;
+      // Determine Esfand length using the browser calendar, not a simplistic
+      // 33-year leap rule. Invalid dates are independently rejected on server.
+      try {
+        const fmt=new Intl.DateTimeFormat('en-u-ca-persian-nu-latn',{timeZone:'UTC',year:'numeric',month:'numeric',day:'numeric'});
+        for (let d=18; d<=22; d++) {
+          const parts=Object.fromEntries(fmt.formatToParts(new Date(Date.UTC(y+622,2,d))).map(p=>[p.type,p.value]));
+          if (Number(parts.year)===y && Number(parts.month)===12 && Number(parts.day)===30) return 30;
+        }
+      } catch (_) { return 30; }
+      return 29;
+    }
+    function rebuildDay(preferred) {
+      day.replaceChildren();
+      for (let d=1; d<=daysInMonth(); d++) option(day,d);
+      day.value=String(Math.min(preferred,daysInMonth()));
+    }
+    function sync() { input.value=[year.value,month.value.padStart(2,'0'),day.value.padStart(2,'0')].join('-'); }
+    rebuildDay(parts[2]);
+    year.addEventListener('change',()=>{rebuildDay(Number(day.value));sync();});
+    month.addEventListener('change',()=>{rebuildDay(Number(day.value));sync();});
+    day.addEventListener('change',sync);
+    input.addEventListener('change',()=>{
+      const p=input.value.split('-').map(Number);
+      if (p.length===3 && p[0]>=parts[0]-10 && p[0]<=parts[0]+10 && p[1]>=1 && p[1]<=12) {
+        year.value=String(p[0]);month.value=String(p[1]);rebuildDay(p[2]);
+      }
+    });
+    picker.querySelector('[data-date-selects]').hidden=false;
+  });
+}
+setupDatePickers();

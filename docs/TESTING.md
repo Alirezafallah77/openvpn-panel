@@ -90,3 +90,23 @@
 - تست واحد رمزنگاری لینک، مجوز 0600 کلید، نبود/اشتباه‌بودن کلید، جلوگیری از ساخت کلید جایگزین روی ciphertext موجود، ابطال لینک حذف‌شده، رزرو نام، منع فعال‌سازی مجدد، حفظ حسابداری نهایی و برگشت کلید/DB در شکست restore را پوشش می‌دهد.
 - [Ubuntu واقعی در هر سه حالت SSH، HTTPS و upgrade](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/41222244696) برای `752a296` موفق شد: کپی دوباره همان لینک، خواندن لینک با **UID وب پس از restore**، اتصال دوباره پس از مهاجرت، قطع کاربر آنلاین پس از حذف و رد اتصال مجدد با گواهی قدیمی تأیید شدند.
 - Chromium: نمایش مستقیم هر سه آیکون بیرون از details، دو بار کپی بدون تغییر لینک، بازشدن dialog ویرایش و ذخیرهٔ سهمیه، انصراف از حذف، حذف با تأیید، 404 شدن لینک قبلی و نمای ۳۹۰ پیکسل بدون overflow/خطای JavaScript بررسی شدند. این بررسی روی دادهٔ ساختگی بوده است، نه VPS کاربر.
+
+### Panel address and locale feature verification
+
+- Local Python suite: **99 tests passing**, including mount isolation, public
+  subscription/profile/static URL generation, admin/CSRF/password requirements,
+  browser preference isolation and safe redirects, English template compilation,
+  Gregorian/Jalali known boundaries and invalid leap days, unchanged activation
+  timestamps, port conflicts, retained subscription listeners, transactional health
+  failure rollback and SSH-only path changes.
+- Node theme suite: **7 passing**; Python compilation, JavaScript syntax, shell
+  syntax and `git diff --check` pass.
+- Real Chromium: PASS for hidden legacy login, English/LTR login, Persian/RTL
+  switching, Jalali date selects inside the edit dialog (1403/1402 Esfand leap
+  boundary), actual current port/path display and 390px mobile layout. This caught
+  and fixed the preferences return URL missing the admin mount prefix.
+- Ubuntu integration now also exercises an actual root-worker path change (all
+  modes), HTTPS public port 5000 (HTTPS mode), old admin 404, old subscription and
+  asset availability, browser preference changes and SSH snapshot rollback before
+  the existing real OpenVPN/backup/migration checks. See the feature commit's
+  GitHub Actions result for live Ubuntu evidence; local mocks are not a substitute.

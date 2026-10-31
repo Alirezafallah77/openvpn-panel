@@ -70,10 +70,10 @@ apt-get install -y "${PACKAGES[@]}"
 getent passwd openvpn-panel >/dev/null || useradd --system --home-dir /var/lib/openvpn-panel --shell /usr/sbin/nologin openvpn-panel
 install -d -o root -g root -m 0755 /opt/openvpn-panel
 # Copy only known application files, not .git, credentials, test databases or venv.
-for file in app.py quota.py hook_entry.py collector_entry.py broker_entry.py scheduler_entry.py metrics.py requirements.txt; do
+for file in app.py quota.py hook_entry.py collector_entry.py broker_entry.py scheduler_entry.py metrics.py panel_web.py i18n.py requirements.txt; do
   install -m 0644 "$SOURCE/$file" /opt/openvpn-panel/
 done
-for dir in vpn templates static; do
+for dir in vpn templates static locales; do
   cp -r "$SOURCE/$dir" /opt/openvpn-panel/
 done
 chown -R root:root /opt/openvpn-panel

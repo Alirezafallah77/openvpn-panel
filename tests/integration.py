@@ -4,6 +4,8 @@ Invoked after install.sh; exercises actual OpenVPN, systemd, hooks, certificates
 web downloads, accounting, disconnect, reconnect rejection and fail-closed.
 """
 import http.cookiejar
+import json
+import urllib.error
 import os
 from pathlib import Path
 import re
@@ -56,6 +58,45 @@ def main():
     portal=opener.open(BASE+'/s/'+token).read()
     assert 'راهنمای اتصال'.encode() in portal
     assert b'id="tab-android"' in portal and b'id="tab-ios"' in portal and b'id="tab-windows"' in portal
+    # Real systemd/Caddy transaction before starting a VPN client: changing the
+    # panel address must not rewrite VPN configuration or first-connect data.
+    env_before=Path('/etc/openvpn-panel/panel.env').read_bytes()
+    vpn_before=Path('/etc/openvpn-panel/vpn.json').read_bytes()
+    server_before=Path('/etc/openvpn/server/panel.conf').read_bytes()
+    https=BASE.startswith('https:')
+    new_port=5000 if https else 443
+    post('/settings/panel',dict(password=PASSWORD,confirm='1',public_port=str(new_port),custom_path='1',admin_path='/ci-admin'))
+    def address_job_finished():
+        state=json.loads(Path('/etc/openvpn-panel/settings-state.json').read_text())
+        if state.get('status')=='failed': raise AssertionError('Panel transaction failed: '+str(state))
+        return state.get('status')=='completed'
+    wait_for(address_job_finished,'public port/admin path transaction completes',timeout=75)
+    new_origin=BASE.rsplit(':',1)[0]+':5000' if https and BASE.count(':')>1 else (BASE+':5000' if https else BASE)
+    assert opener.open(new_origin+'/ci-admin/login').status==200
+    for url in (BASE+'/login',new_origin+'/login'):
+        try: opener.open(url)
+        except urllib.error.HTTPError as error: assert error.code==404
+        else: raise AssertionError('Old admin route still exposed')
+    assert opener.open(BASE+'/s/'+token).status==200
+    assert opener.open(BASE+'/static/style.css').status==200
+    assert Path('/etc/openvpn-panel/vpn.json').read_bytes()==vpn_before
+    assert Path('/etc/openvpn/server/panel.conf').read_bytes()==server_before
+    # Per-browser language/calendar survive server restart without changing DB.
+    page=opener.open(new_origin+'/ci-admin/login').read().decode()
+    csrf=re.search(r'name="csrf" value="([^"]+)"',page).group(1)
+    data=urllib.parse.urlencode(dict(csrf=csrf,language='en',calendar='jalali',next='/ci-admin/login')).encode()
+    english=opener.open(new_origin+'/preferences',data=data).read().decode()
+    assert '<html lang="en" dir="ltr">' in english
+    data=urllib.parse.urlencode(dict(csrf=csrf,language='fa',calendar='gregorian',next='/ci-admin/login')).encode()
+    opener.open(new_origin+'/preferences',data=data).read()
+    cmd('/usr/local/sbin/openvpn-panelctl','settings-rollback')
+    def original_login_ready():
+        try: return opener.open(BASE+'/login',timeout=2).status==200
+        except (OSError,urllib.error.URLError): return False
+    wait_for(original_login_ready,'SSH rollback restores original admin address')
+    assert Path('/etc/openvpn-panel/panel.env').read_bytes()==env_before
+    assert opener.open(BASE+'/s/'+token).status==200
+    print('PASS: real panel address transaction, old admin 404, retained subscription/assets, browser preferences and SSH rollback',flush=True)
     profile = post('/s/'+token+'/profile', {})
     assert b'<key>' in profile and b'remote 192.0.2.1 1194' in profile
     Path('/tmp/e2e.ovpn').write_bytes(profile)

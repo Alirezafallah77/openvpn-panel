@@ -160,3 +160,45 @@ sudo ss -ltnp '( sport = :80 or sport = :443 )'
 کلید `/var/lib/openvpn-panel/quota.sqlite.links.key` باید همراه DB حفظ شود. توسط کاربر وب با mode 0600 ساخته می‌شود؛ عمداً با تغییر رمز مدیر یا restart عوض نمی‌شود. بکاپ جدید آن را وارد آرشیو می‌کند، ciphertextها را در برابر کلید بررسی می‌کند و در restore مالکیت فایل را به مالک DB می‌دهد. مقصد باید نسخهٔ جدید داشته باشد. اگر فایل گم شد، از بکاپ همان DB بازیابی کنید؛ کلید تصادفی جایگزین نکنید. از انتشار فایل، DB و tar.gz خام خودداری کنید؛ نسخهٔ encrypted را برای انتقال ترجیح دهید. دسترسی کامل به کاربر سیستم وب، امکان خواندن DB و کلید را می‌دهد؛ رمزنگاری جایگزین حفاظت از VPS و حساب مدیر نیست.
 
 حذف از رابط، tombstone غیرفعال نگه می‌دارد تا گواهی قبلی با ساخت دوبارهٔ همان نام مجاز نشود. کاربران حذف‌شده در لیست نیستند، لینک‌ها نامعتبرند، اتصال در چرخهٔ حسابداری قطع می‌شود و ترافیک تاریخی در Total traffics می‌ماند. نام تازه برای کاربر جدید انتخاب کنید. restore بکاپ قدیمی ممکن است کاربر حذف‌شده را برگرداند؛ downgrade کد قدیمی روی همین DB می‌تواند قواعد حذف جدید را نشناسد، پس rollback را با بکاپ و نسخهٔ سازگار انجام دهید.
+
+## Public panel address, language and calendar
+
+On **Network settings → Panel address and port**:
+
+- Panel Port is the public **HTTPS** port, not the localhost web service (8000),
+  SSH port or OpenVPN port. The current effective port is displayed; 5000 is an
+  example, not a default. Enable domain/SSL first. Allowed: 443 or 1024–65535,
+  excluding internal 8000/2019 and the VPN port. Open the new TCP port in both
+  server and hosting firewalls **before saving**. Keep TCP 80 open for ACME.
+- Custom Admin URL enables one ASCII segment such as `/my-admin`. After success,
+  use `https://panel.example.com:5000/my-admin/login`. Disabling it restores `/`.
+  Old unprefixed admin routes return 404. This is not a substitute for authentication.
+- Changes require the current admin password, CSRF token and explicit confirmation.
+  The root worker snapshots settings, validates/reloads Caddy, restarts only the
+  web service and verifies HTTPS at the new port/path locally. Failure restores
+  the snapshot. **Local checks cannot detect a hosting firewall or prove public
+  internet reachability.** Record the new address; keep your SSH session open.
+- `/s/<token>` subscription links stay outside the admin prefix. When changing
+  ports, former HTTPS ports retain only subscription routes, their static assets
+  and browser preferences; admin routes return 404 there. Up to eight former ports
+  are retained. Do not close those ports if you still distribute their old links.
+  Existing VPN profiles, quotas and first-connection validity are not rewritten.
+- Recovery: `sudo openvpn-panelctl settings-rollback` restores the most recent
+  network/address snapshot. Like the pre-existing recovery command, this restarts
+  web **and VPN**, so active VPN connections can be interrupted. For forgotten
+  passwords use `sudo openvpn-panelctl password`.
+
+The header language and calendar controls are **per-browser**, independent choices:
+Persian/RTL or English/LTR; Gregorian or Jalali. Preferences apply to login,
+admin pages, subscriber guides, dates and interactive messages. They are held in
+allowlisted HttpOnly, SameSite cookies (Secure on HTTPS), not in the server's
+settings or backups. Cookies must be allowed. Browser theme remains independent.
+
+All date displays retain the **UTC** time zone. Databases continue to store UTC
+Unix timestamps and validity days; selecting Jalali never changes expiry arithmetic.
+On an activated user's edit form, the optional expiration-date picker uses the
+selected calendar (including leap-day validation). Check the explicit date override
+only if you want to replace the days field: it converts the chosen UTC calendar
+date to whole validity days while preserving the original first-connect time of
+day. Before first connection only duration is editable, so validity still starts
+on first connection. Date text input remains available without JavaScript.

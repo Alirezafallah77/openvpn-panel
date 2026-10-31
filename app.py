@@ -11,23 +11,29 @@ from functools import wraps
 from pathlib import Path
 from threading import Lock
 
-from flask import Flask, jsonify, Response, send_file, abort, redirect, render_template, request, session, url_for
+from flask import Flask, jsonify, Response, send_file, abort, redirect, render_template as flask_render_template, request, session
 from werkzeug.security import check_password_hash
 from quota import Quotas, TokenStorageError
 from vpn.client import request_profile, maintenance_request
 from vpn.maintenance import FILENAME
 from metrics import host_metrics, online_users, summaries
+from panel_web import AdminMount, admin_path, public_port, url_for
+from flask import g
+from i18n import LocalizedLoader, translate, format_date, parse_date, date_input
 
 
 def create_app(config=None):
     app = Flask(__name__)
     app.logger.setLevel(logging.INFO)
+    app.jinja_env.globals['url_for']=url_for
     app.config.from_mapping(
         SECRET_KEY=os.environ.get('PANEL_SECRET'),
         ADMIN_PASSWORD_HASH=os.environ.get('PANEL_PASSWORD_HASH'),
         DATABASE=os.environ.get('PANEL_DATABASE', 'instance/quota.sqlite'),
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
         SESSION_COOKIE_SECURE=True, PERMANENT_SESSION_LIFETIME=timedelta(hours=1),
+        ADMIN_PATH=admin_path(os.environ.get('PANEL_ADMIN_PATH','')),
+        DEFAULT_CALENDAR=os.environ.get('PANEL_CALENDAR','gregorian'),
         VPN_CONFIGURED=os.environ.get('PANEL_VPN_CONFIGURED') == '1',
         BACKUP_DIRECTORY='/var/lib/openvpn-panel-backups',
         ONLINE_SNAPSHOT='/var/lib/openvpn-panel-status/online.json',
@@ -55,6 +61,38 @@ def create_app(config=None):
     profile_attempts = []
     lock = Lock()
 
+    # The loader chooses source by browser language; never reuse a compiled
+    # template from another language. User content is still Jinja-autoescaped.
+    app.jinja_loader = LocalizedLoader(app.jinja_loader)
+    app.jinja_env.cache = None
+    app.jinja_env.globals.update(t=translate, date_input=date_input)
+
+    def render_template(template_name,**context):
+        for key in ('error',):
+            if key in context: context[key] = translate(context[key])
+        return flask_render_template(template_name,**context)
+
+    @app.before_request
+    def preferences_context():
+        g.language = request.cookies.get('panel-language', 'fa')
+        if g.language not in ('fa', 'en'): g.language = 'fa'
+        g.calendar = request.cookies.get('panel-calendar', app.config['DEFAULT_CALENDAR'])
+        if g.calendar not in ('gregorian','jalali'): g.calendar = 'gregorian'
+
+    @app.post('/preferences')
+    def preferences():
+        language = request.form.get('language', g.language)
+        calendar = request.form.get('calendar', 'gregorian')
+        if language not in ('fa','en') or calendar not in ('gregorian','jalali'): abort(400)
+        target = request.form.get('next', url_for('login'))
+        # Only root-relative, non-ambiguous same-origin redirects.
+        if not target.startswith('/') or target.startswith('//') or '\\' in target or any(ord(c) < 32 or ord(c) == 127 for c in target):
+            abort(400)
+        response = redirect(target)
+        for name, value in (('panel-language',language),('panel-calendar',calendar)):
+            response.set_cookie(name, value, max_age=31536000, secure=app.config['SESSION_COOKIE_SECURE'], httponly=True, samesite='Lax', path='/')
+        return response
+
     @app.before_request
     def csrf_check():
         if request.method == 'POST':
@@ -65,6 +103,14 @@ def create_app(config=None):
 
     @app.after_request
     def headers(response):
+        response.headers['Content-Language'] = g.get('language','fa')
+        if response.is_json and g.get('language') == 'en':
+            # Translate only explicitly human-readable error/message fields.
+            data = response.get_json()
+            if isinstance(data,dict):
+                for key in ('error','message'):
+                    if isinstance(data.get(key),str): data[key] = translate(data[key])
+                response.set_data(app.json.dumps(data))
         response.headers['Cache-Control'] = 'no-store'
         response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
         response.headers['Referrer-Policy'] = 'no-referrer'
@@ -78,7 +124,7 @@ def create_app(config=None):
     def context():
         if 'csrf' not in session:
             session['csrf'] = secrets.token_urlsafe(32)
-        return dict(csrf=session['csrf'], vpn_configured=app.config['VPN_CONFIGURED'])
+        return dict(csrf=session['csrf'], vpn_configured=app.config['VPN_CONFIGURED'], language=g.language, calendar=g.calendar)
 
     def admin(view):
         @wraps(view)
@@ -226,8 +272,16 @@ def create_app(config=None):
     @admin
     def limits(name):
         try:
-            quotas.update_limits(name, int(request.form.get('gib', '')) * 1024**3,
-                                 int(request.form.get('days', '')))
+            days = int(request.form.get('days',''))
+            if request.form.get('set_expiry_date') == '1':
+                state = quotas.status(name)
+                if state.first_connected is None: raise ValueError('Not activated')
+                # Whole-day validity preserves first-connect time-of-day and
+                # never changes consumption or activation in the database.
+                selected = parse_date(request.form.get('expiry_date',''), request.form.get('date_calendar',g.calendar))
+                first = datetime.fromtimestamp(state.first_connected, timezone.utc).date()
+                days = (selected-first).days
+            quotas.update_limits(name, int(request.form.get('gib', '')) * 1024**3, days)
             app.logger.info('Admin changed allowance user=%s', name)
         except ValueError:
             abort(400)
@@ -317,6 +371,18 @@ def create_app(config=None):
     @admin
     def network_page():
         return render_template('network.html', settings=privileged(dict(operation='network-settings-get')))
+
+    @app.post('/settings/panel')
+    @admin
+    def panel_settings():
+        confirm_password()
+        if request.form.get('confirm')!='1': abort(400)
+        try:
+            port=public_port(request.form.get('public_port',''))
+            prefix=admin_path(request.form.get('admin_path','')) if request.form.get('custom_path')=='1' else ''
+        except ValueError as error: abort(400,description=str(error))
+        privileged(dict(operation='panel-save',public_port=port,admin_path=prefix))
+        return render_template('network_pending.html',target=None,panel_change=True,new_path=prefix,new_port=port)
 
     @app.post('/settings/ssl')
     @admin
@@ -445,10 +511,11 @@ def create_app(config=None):
 
     @app.template_filter('utc')
     def utc(value):
-        return 'هنوز اجرا نشده' if not value else datetime.fromtimestamp(value, timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
+        return format_date(value)
 
     @app.template_filter('gib')
     def gib(value):
         return f'{value / 1024**3:.2f}'
 
+    app.wsgi_app=AdminMount(app.wsgi_app,app.config['ADMIN_PATH'])
     return app
