@@ -2,13 +2,34 @@
 import json
 from pathlib import Path
 import time
+from threading import Lock
 import psutil
+
+
+_cpu_lock = Lock()
+_cpu_cache = {'value': None, 'at': None}
+
+
+def cpu_usage():
+    # A full second avoids the many empty 100 ms windows on lightly loaded VPSs.
+    # Serialize/cache samples across the deployed Gunicorn worker's web threads.
+    with _cpu_lock:
+        now = time.monotonic()
+        if _cpu_cache['at'] is None or now - _cpu_cache['at'] >= 3:
+            try:
+                value = psutil.cpu_percent(interval=1.0)
+                if not 0 <= value <= 100:
+                    value = None
+            except (OSError, psutil.Error):
+                value = None
+            _cpu_cache.update(value=value, at=time.monotonic())
+        return _cpu_cache['value']
 
 
 def host_metrics():
     memory, swap = psutil.virtual_memory(), psutil.swap_memory()
     disk = psutil.disk_usage('/')
-    return dict(cpu=psutil.cpu_percent(interval=0.1), ram=memory.percent,
+    return dict(cpu=cpu_usage(), ram=memory.percent,
                 ram_used=memory.total-memory.available, ram_total=memory.total,
                 swap=swap.percent, swap_used=swap.used, swap_total=swap.total,
                 disk=disk.percent, disk_used=disk.used, disk_total=disk.total)

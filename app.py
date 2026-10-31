@@ -150,6 +150,11 @@ def create_app(config=None):
                                range_end=min(start+per_page,total),
                                stats=summaries(all_users, online), metrics=host_metrics(), online=online)
 
+    @app.get('/api/metrics')
+    @admin
+    def live_metrics():
+        return jsonify(host_metrics())
+
     @app.post('/users')
     @admin
     def create_user():

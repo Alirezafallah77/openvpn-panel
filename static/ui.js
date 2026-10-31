@@ -95,3 +95,44 @@ document.querySelectorAll('[data-create-user]').forEach(form => {
     }
   });
 });
+const liveMetrics = document.querySelector('[data-live-metrics]');
+if (liveMetrics) {
+  const status = document.querySelector('[data-metrics-status]');
+  let pending = false;
+  let timer;
+  const gib = value => (value / 1073741824).toFixed(2);
+  async function updateMetrics() {
+    clearTimeout(timer);
+    if (pending) return;
+    if (document.hidden) { timer = setTimeout(updateMetrics, 5000); return; }
+    pending = true;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+    try {
+      const response = await fetch(liveMetrics.dataset.liveMetrics, {
+        credentials: 'same-origin', headers: {'Accept': 'application/json'}, signal: controller.signal
+      });
+      if (!response.ok || response.redirected) throw new Error('metrics unavailable');
+      const data = await response.json();
+      for (const key of ['cpu', 'ram', 'swap', 'disk']) {
+        const card = liveMetrics.querySelector('[data-metric="' + key + '"]');
+        const value = data[key];
+        const valid = typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100;
+        card.querySelector('[data-metric-value]').textContent = !valid ? 'نامشخص' : key === 'swap' && data.swap_total === 0 ? 'بدون Swap' : value.toFixed(1) + '%';
+        const bar = card.querySelector('progress');
+        bar.hidden = !valid;
+        if (valid) bar.value = value;
+        if (key !== 'cpu') card.querySelector('.metric-detail').textContent = gib(data[key + '_used']) + ' / ' + gib(data[key + '_total']) + ' GiB';
+      }
+      status.textContent = data.cpu === null ? 'خواندن CPU ناموفق است؛ آمار CPU نامشخص است.' : 'آمار منابع به‌روز است؛ بروزرسانی هر ۵ ثانیه.';
+    } catch (_) {
+      status.textContent = 'آمار زنده در دسترس نیست؛ مقادیر قبلی ممکن است قدیمی باشند. اتصال و نشست ورود را بررسی کنید.';
+    } finally {
+      clearTimeout(timeout);
+      pending = false;
+      timer = setTimeout(updateMetrics, 5000);
+    }
+  }
+  timer = setTimeout(updateMetrics, 5000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && !pending) updateMetrics(); });
+}

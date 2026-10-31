@@ -400,3 +400,14 @@ class WebTests(unittest.TestCase):
             response=self.client.get('/?status='+status)
             self.assertIn(('<td>'+name).encode(),response.data)
             self.assertEqual(response.data.count(b'<tr><td>'),1)
+
+    def test_live_metrics_require_admin_and_do_not_cache(self):
+        self.assertEqual(self.client.get('/api/metrics').status_code,302)
+        self.login()
+        with patch('app.host_metrics',return_value={'cpu':12.5,'ram':30,'swap':0,'disk':15}):
+            response=self.client.get('/api/metrics')
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.json['cpu'],12.5)
+            self.assertEqual(response.headers['Cache-Control'],'no-store')
+        with patch('app.host_metrics',return_value={'cpu':None}):
+            self.assertIsNone(self.client.get('/api/metrics').json['cpu'])
