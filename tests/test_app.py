@@ -332,6 +332,8 @@ class WebTests(unittest.TestCase):
             result=self.client.get('/?'+query)
             self.assertEqual(result.status_code,200)
             self.assertEqual(result.data.count(b'<tr><td>p'),20 if not query.startswith('page=999') else 15)
+        all_rows=self.client.get('/?per_page=100')
+        self.assertEqual(all_rows.data.count(b'<tr><td>p'),55)
         filtered=self.client.get('/?q=p05&per_page=50&page=999')
         self.assertEqual(filtered.data.count(b'<tr><td>p'),5)
         self.assertIn(b'55',filtered.data)
@@ -392,7 +394,9 @@ class WebTests(unittest.TestCase):
         self.q.create_user('exhausted',100,30)
         self.q.connect('exhausted','empty',now=now)
         self.q.account('empty',100,0,now=now)
-        for status,name in [('near_limit','near_volume'),('near_expiry','near_date'),('limited','exhausted')]:
+        self.q.create_user('expired_date',100,1)
+        self.q.connect('expired_date','past',now=1)
+        for status,name in [('near_limit','near_volume'),('near_expiry','near_date'),('limited','exhausted'),('expired','expired_date')]:
             response=self.client.get('/?status='+status)
             self.assertIn(('<td>'+name).encode(),response.data)
             self.assertEqual(response.data.count(b'<tr><td>'),1)
