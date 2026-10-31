@@ -172,3 +172,19 @@ class NetworkSettingsTests(unittest.TestCase):
         self.assertEqual(state['diagnostic'],'caddy_validate')
         self.assertNotIn('private-root-detail',json.dumps(state))
         self.assertIn('private-root-detail','\n'.join(logs.output))
+
+    def test_first_caddy_start_skips_reset_for_unloaded_inactive_unit(self):
+        n.subprocess.run.return_value=Mock(returncode=1)
+        n.active.return_value=False
+        n.caddy_apply({})
+        calls=[call.args for call in n.command.call_args_list]
+        self.assertNotIn(('/usr/bin/systemctl','reset-failed','caddy.service'),calls)
+        self.assertIn(('/usr/bin/systemctl','start','caddy.service'),calls)
+
+    def test_caddy_failed_unit_is_reset_before_start_limit_retry(self):
+        n.subprocess.run.return_value=Mock(returncode=0)
+        n.active.return_value=False
+        n.caddy_apply({})
+        calls=[call.args for call in n.command.call_args_list]
+        self.assertLess(calls.index(('/usr/bin/systemctl','reset-failed','caddy.service')),
+                        calls.index(('/usr/bin/systemctl','start','caddy.service')))

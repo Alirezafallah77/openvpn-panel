@@ -113,6 +113,15 @@ def systemctl(*args):
     command('/usr/bin/systemctl', *args)
 
 
+def reset_failed(unit):
+    # Inactive, disabled units may be garbage-collected by systemd. Calling
+    # reset-failed on such a unit returns 1 ("not loaded") before start can load it.
+    # Only failed units require a reset (including start-limit recovery).
+    if subprocess.run(['/usr/bin/systemctl','is-failed','--quiet',unit],
+                      capture_output=True,timeout=5).returncode == 0:
+        systemctl('reset-failed',unit)
+
+
 def active(unit):
     return subprocess.run(['/usr/bin/systemctl','is-active','--quiet',unit],
                           capture_output=True, timeout=5).returncode == 0
@@ -250,7 +259,7 @@ def restart_vpn():
 
 
 def restart_web():
-    systemctl('reset-failed','openvpn-panel.service')
+    reset_failed('openvpn-panel.service')
     systemctl('restart','openvpn-panel.service')
 
 
@@ -265,7 +274,7 @@ def caddy_apply(saved):
             logging.error('Caddy validation stderr: %s', detail[:8192])
         raise SettingsFailure('caddy_validate') from error
     try:
-        systemctl('reset-failed','caddy.service')
+        reset_failed('caddy.service')
         if active('caddy.service'):
             systemctl('reload','caddy.service')
         else:
