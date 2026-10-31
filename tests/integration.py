@@ -98,9 +98,10 @@ def main():
         subprocess.run(['ip', 'netns', 'exec', 'ovp-test', 'ping', '-c', '3', '-W', '1', '1.1.1.1'], check=False)
         wait_for(lambda: q.status('e2e').used_bytes > 100, 'live bidirectional-byte accounting')
         # Require actual HTTPS forwarding too (no reliance on client OS DNS hooks).
-        github_ip = socket.gethostbyname('api.github.com')
+        github_ip = socket.gethostbyname('github.com')
         cmd('ip', 'netns', 'exec', 'ovp-test', 'curl', '--noproxy', '*', '--fail', '--max-time', '25',
-            '--resolve', f'api.github.com:443:{github_ip}', 'https://api.github.com/zen')
+            '--retry', '2', '--retry-all-errors', '--retry-delay', '1',
+            '--resolve', f'github.com:443:{github_ip}', '--output', '/tmp/vpn-internet-proof.txt', 'https://github.com/robots.txt')
         print('PASS: internet HTTPS routed through VPN', flush=True)
         q.update_limits('e2e', 1, 30)
         wait_for(lambda: q.status('e2e').reason == 'volume_exhausted', 'volume exhausted')
