@@ -128,7 +128,6 @@ def main():
     try:
         wait_for(connected, 'real TLS tunnel established')
         wait_for(lambda: q.status('e2e').first_connected is not None, 'first activation persisted')
-        import json
         def observed_online():
             data = json.loads(Path('/var/lib/openvpn-panel-status/online.json').read_text())
             return 'e2e' in data['users']
