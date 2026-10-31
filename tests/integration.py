@@ -84,6 +84,15 @@ def main():
     try:
         wait_for(connected, 'real TLS tunnel established')
         wait_for(lambda: q.status('e2e').first_connected is not None, 'first activation persisted')
+        import json
+        def observed_online():
+            data = json.loads(Path('/var/lib/openvpn-panel-status/online.json').read_text())
+            return 'e2e' in data['users']
+        wait_for(observed_online, 'online snapshot reflects real connected user')
+        dashboard = opener.open(BASE + '/?q=e2e').read()
+        for label in (b'CPU USAGE',b'RAM USAGE',b'SWAP USAGE',b'DISK USAGE',b'Total Users',b'Online'):
+            assert label in dashboard
+        print('PASS: resource dashboard and user search', flush=True)
         # Generate real client traffic. Ping may be filtered upstream but transmitted
         # bytes must still appear in server management counters.
         subprocess.run(['ip', 'netns', 'exec', 'ovp-test', 'ping', '-c', '3', '-W', '1', '1.1.1.1'], check=False)
@@ -135,6 +144,49 @@ def main():
         Path('/tmp/e2e.ovpn').write_bytes(new_profile)
         client = start_client()
         wait_for(connected, 'replacement certificate connects')
+        # Web-managed encryption; no real Telegram token or public bot required.
+        migration_password = 'migration-test-passphrase-123'
+        post('/backups/settings', dict(password=PASSWORD, interval='15', enabled='0',
+                                      passphrase=migration_password, token='', chat_id=''))
+        post('/backups/create', {})
+        backup_page = opener.open(BASE + '/backups').read().decode()
+        backup_name = re.search(r'backup-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\.ovpnbak', backup_page).group(0)
+        encrypted = opener.open(BASE + '/backups/download/' + backup_name).read()
+        from vpn.backups import decrypt, MAGIC
+        assert encrypted.startswith(MAGIC)
+        assert decrypt(encrypted, migration_password)
+        Path('/root/migration.ovpnbak').write_bytes(encrypted)
+        Path('/root/migration-passphrase').write_text(migration_password)
+        Path('/root/migration-passphrase').chmod(0o600)
+        first = q.status('e2e').first_connected
+        # Verify downtime controls never stop VPN or its accounting.
+        post('/system/web', dict(password=PASSWORD, confirm='1', action='restart'))
+        time.sleep(5)
+        cmd('systemctl','is-active','--quiet','openvpn-panel')
+        cmd('systemctl','is-active','--quiet','openvpn-server@panel')
+        post('/system/web', dict(password=PASSWORD, confirm='1', action='stop'))
+        wait_for(lambda: subprocess.run(['systemctl','is-active','--quiet','openvpn-panel']).returncode != 0,
+                 'web stop does not need root privileges in UI')
+        cmd('systemctl','is-active','--quiet','openvpn-server@panel')
+        cmd('systemctl','is-active','--quiet','openvpn-panel-accounting')
+        cmd('/usr/local/sbin/openvpn-panelctl','web-start')
+        print('PASS: encrypted web backups and isolated panel stop/restart', flush=True)
+        client.terminate()
+        client.wait(timeout=10)
+        # Mutate current data, then restore the backup; new-host endpoint/settings must survive.
+        q.create_user('must-disappear',100,1)
+        endpoint_before = Path('/etc/openvpn-panel/vpn.json').read_bytes()
+        env_before = Path('/etc/openvpn-panel/panel.env').read_bytes()
+        cmd('/usr/local/sbin/openvpn-panelctl','restore','/root/migration.ovpnbak',
+            '--passphrase-file','/root/migration-passphrase','--yes')
+        assert [u.name for u in q.list_users()] == ['e2e']
+        assert q.status('e2e').first_connected == first
+        assert Path('/etc/openvpn-panel/vpn.json').read_bytes() == endpoint_before
+        assert Path('/etc/openvpn-panel/panel.env').read_bytes() == env_before
+        assert opener.open(BASE + '/s/' + token).status == 200
+        client = start_client()
+        wait_for(connected, 'restored certificate and users reconnect after migration')
+        print('PASS: validated restore preserves new host settings and old user links', flush=True)
         cmd('/usr/local/sbin/openvpn-panelctl', 'backup', '/root/panel-ci-backup.tar.gz')
         import tarfile
         with tarfile.open('/root/panel-ci-backup.tar.gz') as archive:

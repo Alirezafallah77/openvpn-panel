@@ -65,7 +65,7 @@ apt-get install -y "${PACKAGES[@]}"
 getent passwd openvpn-panel >/dev/null || useradd --system --home-dir /var/lib/openvpn-panel --shell /usr/sbin/nologin openvpn-panel
 install -d -o root -g root -m 0755 /opt/openvpn-panel
 # Copy only known application files, not .git, credentials, test databases or venv.
-for file in app.py quota.py hook_entry.py collector_entry.py broker_entry.py requirements.txt; do
+for file in app.py quota.py hook_entry.py collector_entry.py broker_entry.py scheduler_entry.py metrics.py requirements.txt; do
   install -m 0644 "$SOURCE/$file" /opt/openvpn-panel/
 done
 for dir in vpn templates static; do
@@ -79,16 +79,18 @@ python3 -m venv /opt/openvpn-panel/.venv
 chmod -R a+rX /opt/openvpn-panel/.venv
 install -d -o openvpn-panel -g openvpn-panel -m 0770 /var/lib/openvpn-panel
 install -d -o root -g root -m 0700 /var/lib/openvpn-panel-revocations
+install -d -o root -g openvpn-panel -m 0710 /var/lib/openvpn-panel-backups /var/lib/openvpn-panel-status
 install -d -m 0755 /etc/openvpn/server
 /opt/openvpn-panel/.venv/bin/python "$SOURCE/scripts/configure.py" "$ENDPOINT" "$DOMAIN" "$INTERFACE" "$PASSWORD_FILE"
 # Make DB before OpenVPN hooks run. All writers use group-compatible journals.
 sudo -u openvpn-panel /opt/openvpn-panel/.venv/bin/python -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from quota import Quotas; Quotas('/var/lib/openvpn-panel/quota.sqlite')"
 chmod 0660 /var/lib/openvpn-panel/quota.sqlite
 install -m 0755 "$SOURCE/scripts/panelctl.py" /usr/local/sbin/openvpn-panelctl
-install -m 0644 "$SOURCE"/deploy/*.service /etc/systemd/system/
+install -m 0644 "$SOURCE"/deploy/*.service "$SOURCE"/deploy/*.timer /etc/systemd/system/
 install -d /etc/systemd/system/openvpn-server@panel.service.d
 install -m 0644 "$SOURCE/deploy/openvpn-override.conf" /etc/systemd/system/openvpn-server@panel.service.d/panel.conf
 systemctl daemon-reload
+systemctl enable --now openvpn-panel-backup.timer
 systemctl enable --now openvpn-panel-network.service openvpn-panel.service openvpn-panel-pki.service
 systemctl enable --now openvpn-server@panel.service
 if [[ -n $DOMAIN ]]; then

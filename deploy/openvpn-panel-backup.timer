@@ -1,0 +1,10 @@
+[Unit]
+Description=Check configured backup interval every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=1min
+Unit=openvpn-panel-backup.service
+
+[Install]
+WantedBy=timers.target

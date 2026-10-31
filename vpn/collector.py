@@ -1,5 +1,6 @@
 """Root-only management socket poller; systemd BindsTo stops VPN on failure."""
 import os
+import json
 import re
 import socket
 import time
@@ -9,6 +10,7 @@ from quota import Quotas
 SOCKET = '/run/openvpn-panel/management.sock'
 HEARTBEAT = '/run/openvpn-panel/heartbeat'
 REVOCATIONS = Path('/var/lib/openvpn-panel-revocations')
+SNAPSHOT = Path('/var/lib/openvpn-panel-status/online.json')
 NAME = re.compile(r'[A-Za-z0-9_-]{1,64}\Z', re.ASCII)
 
 
@@ -84,6 +86,7 @@ class Management:
 
 
 def enforce(quotas, management):
+    online = []
     for name, address, rx, tx in management.status():
         try:
             state = quotas.vpn_account(name, address, rx, tx)
@@ -92,6 +95,9 @@ def enforce(quotas, management):
             continue
         if not state.allowed or (REVOCATIONS / ('revoke-' + name)).exists():
             management.kill(name)
+        else:
+            online.append(name)
+    return online
 
 
 def notify(message):
@@ -120,7 +126,7 @@ def main():
     management = Management()
     try:
         while True:
-            enforce(quotas, management)
+            online = enforce(quotas, management)
             # A second snapshot ensures the killed connection is absent before
             # admitting the replacement certificate with the same common name.
             pending = list(REVOCATIONS.glob('revoke-*'))
@@ -129,6 +135,10 @@ def main():
                 for marker in pending:
                     if marker.name[7:] not in live:
                         marker.unlink(missing_ok=True)
+            temporary = SNAPSHOT.with_suffix('.new')
+            temporary.write_text(json.dumps(dict(updated_at=time.time(), users=online)))
+            temporary.chmod(0o640)
+            temporary.replace(SNAPSHOT)
             Path(HEARTBEAT).touch(mode=0o600)
             notify('WATCHDOG=1')
             time.sleep(2)

@@ -118,3 +118,58 @@ class WebTests(unittest.TestCase):
         state = self.q.status('alice')
         self.assertEqual((state.used_bytes, state.first_connected, state.days), (30, 100, 30))
         self.assertEqual(self.post('/users/alice/limits', dict(gib='0', days='30')).status_code, 400)
+
+    def test_search_and_dashboard_totals_not_filtered(self):
+        self.login()
+        self.q.create_user('alice', 100, 1)
+        self.q.create_user('bob', 100, 2)
+        self.q.set_enabled('alice', False)
+        response = self.client.get('/?q=BOB')
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b'<td>bob', response.data)
+        self.assertNotIn(b'<td>alice', response.data)
+        for label in (b'Total Users', b'Disabled', b'Expired', b'Online', b'Total traffics',
+                      b'CPU USAGE', b'RAM USAGE', b'SWAP USAGE', b'DISK USAGE'):
+            self.assertIn(label, response.data)
+        response = self.client.get('/?q=%3Cscript%3E')
+        self.assertNotIn(b'<script>', response.data)
+
+    def test_backup_settings_masking_download_and_auth(self):
+        self.assertEqual(self.client.get('/backups').status_code, 302)
+        self.login()
+        self.app.config['VPN_CONFIGURED'] = True
+        public = dict(enabled=False, interval=15, chat_id='', token_configured=True,
+                      encryption_configured=True, state={}, files=[])
+        with patch('app.maintenance_request', return_value=public):
+            response = self.client.get('/backups')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b'name="token"', response.data)
+            self.assertEqual(self.post('/backups/settings', dict(password='wrong',interval='15')).status_code, 403)
+            self.assertEqual(self.post('/backups/settings', dict(password='test-password-123',interval='0')).status_code, 400)
+            self.assertEqual(self.post('/backups/settings', dict(password='test-password-123',interval='15',passphrase='a'*16)).status_code, 302)
+            self.assertEqual(self.post('/backups/create').status_code, 302)
+        self.app.config['BACKUP_DIRECTORY'] = self.temp.name
+        name = 'backup-20261031T000000Z-abcdef12.ovpnbak'
+        with open(os.path.join(self.temp.name,name), 'wb') as file: file.write(b'encrypted')
+        response = self.client.get('/backups/download/'+name)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, b'encrypted')
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        response.close()
+        self.assertEqual(self.client.get('/backups/download/panel.env').status_code, 404)
+        os.unlink(os.path.join(self.temp.name,name))
+        os.symlink(os.path.join(self.temp.name,'test.sqlite'), os.path.join(self.temp.name,name))
+        self.assertEqual(self.client.get('/backups/download/'+name).status_code, 404)
+
+    def test_panel_control_requires_password_confirmation_and_csrf(self):
+        self.login()
+        self.app.config['VPN_CONFIGURED'] = True
+        with patch('app.maintenance_request', return_value=dict(scheduled=True)) as broker:
+            self.assertEqual(self.post('/system/web', dict(action='stop',password='wrong',confirm='1')).status_code, 403)
+            self.assertEqual(self.post('/system/web', dict(action='stop',password='test-password-123')).status_code, 400)
+            self.assertEqual(self.post('/system/web', dict(action='reboot',password='test-password-123',confirm='1')).status_code, 400)
+            broker.assert_not_called()
+            response = self.post('/system/web', dict(action='stop',password='test-password-123',confirm='1'))
+            self.assertEqual(response.status_code, 200)
+            self.assertIn(b'openvpn-panelctl web-start', response.data)
+            broker.assert_called_once_with(dict(operation='web-control',action='stop'))

@@ -7,6 +7,7 @@ import socket
 import socketserver
 import struct
 from vpn.provision import profile
+from vpn.maintenance import dispatch
 
 SOCKET = '/run/openvpn-panel-pki/broker.sock'
 
@@ -18,13 +19,18 @@ class Handler(socketserver.StreamRequestHandler):
         if uid != self.server.allowed_uid:
             return
         try:
-            line = self.rfile.readline(4097)
-            if len(line) > 4096 or not line.endswith(b'\n'):
+            line = self.rfile.readline(16385)
+            if len(line) > 16384 or not line.endswith(b'\n'):
                 return
             message = json.loads(line)
-            if set(message) != {'name', 'action'} or not all(type(v) is str for v in message.values()):
+            if type(message) is not dict:
                 raise ValueError('invalid request')
-            result = dict(ok=True, profile=profile(message['name'], message['action']))
+            if 'operation' in message:
+                result = dict(ok=True, result=dispatch(message))
+            else:
+                if set(message) != {'name', 'action'} or not all(type(v) is str for v in message.values()):
+                    raise ValueError('invalid request')
+                result = dict(ok=True, profile=profile(message['name'], message['action']))
         except Exception:
             # No certificate material or request bodies in journal.
             print('PKI request failed', flush=True)

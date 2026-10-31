@@ -1,0 +1,20 @@
+[Unit]
+Description=Encrypted OpenVPN backup and Telegram delivery
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=openvpn-panel
+WorkingDirectory=/opt/openvpn-panel
+ExecStart=/opt/openvpn-panel/.venv/bin/python -Es /opt/openvpn-panel/scheduler_entry.py
+TimeoutStartSec=180
+UMask=0077
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ReadWritePaths=/etc/openvpn-panel /var/lib/openvpn-panel-backups
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6

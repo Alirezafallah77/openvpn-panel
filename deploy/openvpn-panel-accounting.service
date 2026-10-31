@@ -20,7 +20,7 @@ NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
-ReadWritePaths=/var/lib/openvpn-panel /run/openvpn-panel /var/lib/openvpn-panel-revocations
+ReadWritePaths=/var/lib/openvpn-panel /var/lib/openvpn-panel-status /run/openvpn-panel /var/lib/openvpn-panel-revocations
 RestrictAddressFamilies=AF_UNIX
 
 [Install]

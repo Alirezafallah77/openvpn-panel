@@ -6,15 +6,17 @@ import secrets
 import sqlite3
 import logging
 import time
-from datetime import timedelta
+from datetime import timedelta, datetime, timezone
 from functools import wraps
 from pathlib import Path
 from threading import Lock
 
-from flask import Flask, Response, abort, redirect, render_template, request, session, url_for
+from flask import Flask, Response, send_file, abort, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from quota import Quotas
-from vpn.client import request_profile
+from vpn.client import request_profile, maintenance_request
+from vpn.maintenance import FILENAME
+from metrics import host_metrics, online_users, summaries
 
 
 def create_app(config=None):
@@ -27,6 +29,8 @@ def create_app(config=None):
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Strict',
         SESSION_COOKIE_SECURE=True, PERMANENT_SESSION_LIFETIME=timedelta(hours=1),
         VPN_CONFIGURED=os.environ.get('PANEL_VPN_CONFIGURED') == '1',
+        BACKUP_DIRECTORY='/var/lib/openvpn-panel-backups',
+        ONLINE_SNAPSHOT='/var/lib/openvpn-panel-status/online.json',
         MAX_CONTENT_LENGTH=8192, TRUSTED_HOSTS=['localhost', '127.0.0.1'],
     )
     if os.environ.get('PANEL_HOST'):
@@ -106,7 +110,12 @@ def create_app(config=None):
     @app.get('/')
     @admin
     def dashboard():
-        return render_template('dashboard.html', users=quotas.list_users())
+        all_users = quotas.list_users()
+        search = request.args.get('q', '').strip()[:64]
+        online = online_users(app.config['ONLINE_SNAPSHOT'])
+        users = [u for u in all_users if search.casefold() in u.name.casefold()]
+        return render_template('dashboard.html', users=users, search=search,
+                               stats=summaries(all_users, online), metrics=host_metrics(), online=online)
 
     @app.post('/users')
     @admin
@@ -182,6 +191,73 @@ def create_app(config=None):
         return Response(profile, mimetype='application/x-openvpn-profile', headers={
             'Content-Disposition': f'attachment; filename="{name}.ovpn"'})
 
+    def privileged(message):
+        if not app.config['VPN_CONFIGURED']:
+            abort(503)
+        try:
+            return maintenance_request(message)
+        except (OSError, ValueError):
+            abort(503, description='سرویس نگهداری در دسترس نیست یا تنظیمات معتبر نیست.')
+
+    def confirm_password():
+        if not check_password_hash(app.config['ADMIN_PASSWORD_HASH'], request.form.get('password', '')):
+            abort(403)
+
+    @app.get('/backups')
+    @admin
+    def backup_page():
+        return render_template('backups.html', settings=privileged(dict(operation='backup-settings-get')))
+
+    @app.post('/backups/settings')
+    @admin
+    def backup_settings():
+        confirm_password()
+        try:
+            interval = int(request.form.get('interval', ''))
+        except ValueError:
+            abort(400)
+        if not 5 <= interval <= 10080:
+            abort(400)
+        token = request.form.get('token', '').strip()
+        chat_id = request.form.get('chat_id', '').strip()
+        phrase = request.form.get('passphrase', '')
+        if ((token and not re.fullmatch(r'[0-9]{5,20}:[A-Za-z0-9_-]{20,100}', token)) or
+                (chat_id and not re.fullmatch(r'-?[0-9]{1,20}|@[A-Za-z0-9_]{5,64}', chat_id)) or
+                (phrase and not 16 <= len(phrase) <= 1024)):
+            abort(400, description='توکن، Chat ID یا طول رمز بکاپ معتبر نیست.')
+        privileged(dict(operation='backup-settings-save', interval=interval,
+            enabled=request.form.get('enabled') == '1', token=request.form.get('token', '').strip(),
+            chat_id=request.form.get('chat_id', '').strip(), passphrase=request.form.get('passphrase', '')))
+        app.logger.info('Admin changed encrypted backup settings')
+        return redirect(url_for('backup_page'))
+
+    @app.post('/backups/create')
+    @admin
+    def backup_create():
+        privileged(dict(operation='backup-create'))
+        return redirect(url_for('backup_page'))
+
+    @app.get('/backups/download/<name>')
+    @admin
+    def backup_download(name):
+        if not FILENAME.fullmatch(name):
+            abort(404)
+        path = Path(app.config['BACKUP_DIRECTORY']) / name
+        if path.is_symlink() or not path.is_file():
+            abort(404)
+        return send_file(path, as_attachment=True, download_name=name, mimetype='application/octet-stream')
+
+    @app.post('/system/web')
+    @admin
+    def web_control():
+        confirm_password()
+        action = request.form.get('action')
+        if action not in ('stop', 'restart') or request.form.get('confirm') != '1':
+            abort(400)
+        privileged(dict(operation='web-control', action=action))
+        app.logger.info('Admin scheduled web service action=%s', action)
+        return render_template('control.html', action=action)
+
     @app.get('/s/<token>')
     def subscription(token):
         if len(token) != 43:
@@ -190,6 +266,10 @@ def create_app(config=None):
         if state is None:
             abort(404)
         return render_template('status.html', user=state)
+
+    @app.template_filter('utc')
+    def utc(value):
+        return 'هنوز اجرا نشده' if not value else datetime.fromtimestamp(value, timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
 
     @app.template_filter('gib')
     def gib(value):
