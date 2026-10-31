@@ -162,3 +162,13 @@ class NetworkSettingsTests(unittest.TestCase):
                 result=n.probe_tls('panel.example.com')
             self.assertTrue(result['valid'])
             self.assertEqual(result['http_ok'],expected)
+
+    def test_caddy_validation_detail_is_root_log_only(self):
+        n.queue(dict(operation='ssl-save',domain='new.example.com',use_for_vpn=True))
+        n.command.side_effect=n.subprocess.CalledProcessError(1,['caddy','validate'],stderr=b'private-root-detail')
+        with self.assertLogs(level='ERROR') as logs:
+            n.apply_pending()
+        state=json.loads((self.root/'settings-state.json').read_text())
+        self.assertEqual(state['diagnostic'],'caddy_validate')
+        self.assertNotIn('private-root-detail',json.dumps(state))
+        self.assertIn('private-root-detail','\n'.join(logs.output))

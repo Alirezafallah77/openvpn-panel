@@ -72,7 +72,9 @@ jobs:
           test "$BEFORE" = "$AFTER"
       - name: Verify fresh SSH-to-domain failure and automatic rollback
         if: matrix.mode == 'ssh'
-        run: sudo /opt/openvpn-panel/.venv/bin/python tests/integration_ssl_failure.py
+        run: |
+          set -o pipefail
+          sudo /opt/openvpn-panel/.venv/bin/python tests/integration_ssl_failure.py 2>&1 | tee /tmp/panel-ssl.log
       - name: Configure private test HTTPS CA (no public DNS or ACME required)
         if: matrix.mode == 'https'
         run: |
@@ -108,13 +110,13 @@ jobs:
           python3 - <<'PYCODE'
           import json, os, pathlib, subprocess, time
           sections = []
-          for filename in ('/tmp/panel-install.log', '/tmp/panel-e2e.log', '/tmp/panel-services.log', '/tmp/e2e-client.log'):
+          for filename in ('/tmp/panel-install.log', '/tmp/panel-ssl.log', '/tmp/panel-e2e.log', '/tmp/panel-services.log', '/tmp/e2e-client.log'):
               path = pathlib.Path(filename)
               if path.exists():
                   sections.append('### ' + path.name + '\n```text\n' + path.read_text(errors='replace')[-10000:] + '\n```')
           data = dict(name='VPN integration diagnostics (${{ matrix.mode }})', head_sha=os.environ['GITHUB_SHA'],
                       status='completed', conclusion='neutral',
-                      output=dict(title='Ephemeral runner diagnostics', summary='\n'.join(sections).encode('utf-8')[-50000:].decode('utf-8', errors='replace')))
+                      output=dict(title='Ephemeral runner diagnostics', summary='\n'.join(sections).encode('utf-8')[-45000:].decode('utf-8', errors='ignore')))
           for attempt in range(3):
               result = subprocess.run(['gh','api','--method','POST','repos/' + os.environ['GITHUB_REPOSITORY'] + '/check-runs', '--input','-'], input=json.dumps(data), text=True, stdout=subprocess.DEVNULL)
               if result.returncode == 0:

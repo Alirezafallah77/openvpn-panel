@@ -258,6 +258,11 @@ def caddy_apply(saved):
     try:
         command('caddy','validate','--config',str(CADDY))
     except Exception as error:
+        # Validation runs as a CLI, so its captured stderr is NOT in caddy.service's journal.
+        # Log only this fixed Caddy command's output in the root worker journal, never the web.
+        detail = getattr(error, 'stderr', None)
+        if detail:
+            logging.error('Caddy validation stderr: %s', detail[:8192])
         raise SettingsFailure('caddy_validate') from error
     try:
         systemctl('reset-failed','caddy.service')
