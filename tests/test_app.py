@@ -411,3 +411,52 @@ class WebTests(unittest.TestCase):
             self.assertEqual(response.headers['Cache-Control'],'no-store')
         with patch('app.host_metrics',return_value={'cpu':None}):
             self.assertIsNone(self.client.get('/api/metrics').json['cpu'])
+
+    def test_direct_row_actions_edit_and_copy_without_rotating(self):
+        self.login()
+        created=self.post('/users',dict(name='alice',gib=50,days=30))
+        import re
+        token=re.search(rb'/s/([A-Za-z0-9_-]{43})',created.data).group(1).decode()
+        page=self.client.get('/')
+        for marker in (b'edit-action',b'copy-action',b'delete-action',b'data-user-dialog'):
+            self.assertIn(marker,page.data)
+        self.assertNotIn('مدیریت اشتراک ‹'.encode(),page.data)
+        self.assertEqual(self.client.get('/users/alice/edit').status_code,200)
+        self.client.get('/login')
+        with self.client.session_transaction() as session: csrf=session['csrf']
+        for _ in range(2):
+            copied=self.client.post('/users/alice/link',data=dict(csrf=csrf),headers={'Accept':'application/json'})
+            self.assertEqual(copied.status_code,200)
+            self.assertTrue(copied.json['subscription_url'].endswith('/s/'+token))
+            self.assertEqual(copied.headers['Cache-Control'],'no-store')
+        self.assertIsNotNone(self.q.status_by_token(token))
+        self.assertEqual(self.client.post('/users/alice/link').status_code,400)
+
+    def test_legacy_copy_requires_explicit_rotation_and_deleted_users_cannot_return(self):
+        self.login()
+        token=self.q.create_user('legacy',100,30)
+        self.client.get('/login')
+        with self.client.session_transaction() as session: csrf=session['csrf']
+        legacy=self.client.post('/users/legacy/link',data=dict(csrf=csrf),headers={'Accept':'application/json'})
+        self.assertEqual(legacy.status_code,409)
+        self.assertTrue(legacy.json['needs_rotation'])
+        self.assertIsNotNone(self.q.status_by_token(token))
+        self.assertEqual(self.client.get('/users/legacy/delete').status_code,200)
+        self.assertEqual(self.post('/users/legacy/delete',dict(confirm='1',confirm_name='wrong')).status_code,400)
+        self.assertEqual(self.post('/users/legacy/delete',dict(confirm='1',confirm_name='legacy',page=2,per_page=50)).status_code,302)
+        self.assertEqual(self.client.get('/s/'+token).status_code,404)
+        self.assertEqual(self.client.get('/users/legacy/edit').status_code,404)
+        self.assertEqual(self.post('/users/legacy/link').status_code,404)
+        self.assertEqual(self.post('/users/legacy/toggle',dict(enabled='1')).status_code,404)
+        self.assertEqual(self.post('/users',dict(name='legacy',gib=50,days=30)).status_code,400)
+
+    def test_deleted_user_actions_require_admin_and_csrf(self):
+        self.q.create_user('alice',100,30)
+        self.client.get('/login')
+        with self.client.session_transaction() as session: csrf=session['csrf']
+        for route in ('/users/alice/edit','/users/alice/delete'):
+            self.assertEqual(self.client.get(route).status_code,302)
+        self.assertEqual(self.client.post('/users/alice/delete',data=dict(csrf=csrf,confirm='1',confirm_name='alice')).status_code,302)
+        self.login()
+        self.assertEqual(self.client.post('/users/alice/delete',data=dict(confirm='1',confirm_name='alice')).status_code,400)
+        self.assertTrue(self.q.status('alice').enabled)

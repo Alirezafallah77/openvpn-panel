@@ -1,6 +1,11 @@
 """Transactional quota accounting core. Timestamps are UTC Unix seconds."""
 from __future__ import annotations
 import hashlib
+import os
+from pathlib import Path
+import stat
+import tempfile
+from cryptography.fernet import Fernet, InvalidToken
 import secrets
 import sqlite3
 import time
@@ -37,11 +42,39 @@ class Status:
     expires_at: int | None
     remaining_seconds: int | None
 
+class TokenStorageError(RuntimeError):
+    pass
+
+
+def link_key_path(database):
+    return Path(str(database)+'.links.key')
+
+
+def read_link_key(path):
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+        with os.fdopen(fd, 'rb') as file:
+            info = os.fstat(file.fileno())
+            if not stat.S_ISREG(info.st_mode) or info.st_size != 44 or info.st_mode & 0o077:
+                raise ValueError('Invalid link key permissions or size')
+            key = file.read(45)
+            Fernet(key)
+            return key
+    except (OSError, ValueError) as error:
+        raise TokenStorageError('Subscription key unavailable') from error
+
+
 class Quotas:
     def __init__(self, path: str):
         self.path = path
         with self._db() as db:
             db.executescript(SCHEMA)
+            db.execute('BEGIN IMMEDIATE')
+            columns = {row[1] for row in db.execute('PRAGMA table_info(users)')}
+            if 'encrypted_token' not in columns:
+                db.execute('ALTER TABLE users ADD COLUMN encrypted_token TEXT')
+            if 'deleted' not in columns:
+                db.execute('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1))')
 
     @contextmanager
     def _db(self):
@@ -66,7 +99,7 @@ class Quotas:
     @staticmethod
     def _status(row, now):
         expiry = None if row['first_connected'] is None else row['first_connected'] + row['days'] * 86400
-        if not row['enabled']:
+        if row['deleted'] or not row['enabled']:
             reason = 'disabled'
         elif row['used_bytes'] >= row['limit_bytes']:
             reason = 'volume_exhausted'
@@ -86,21 +119,24 @@ class Quotas:
             raise KeyError(name)
         return row
 
-    def create_user(self, name: str, limit_bytes: int, days: int) -> str:
+    def create_user(self, name: str, limit_bytes: int, days: int, *, remember=False) -> str:
         if not name or len(name) > 64 or not all(c.isascii() and (c.isalnum() or c in '-_') for c in name):
             raise ValueError('name must be 1-64 ASCII letters, digits, underscores or hyphens')
         if type(limit_bytes) is not int or type(days) is not int or limit_bytes <= 0 or days <= 0:
             raise ValueError('limits must be positive integers')
         token = secrets.token_urlsafe(32)
         digest = hashlib.sha256(token.encode('ascii')).hexdigest()
+        encrypted = self._encrypt_token(token) if remember else None
         with self._db() as db:
-            db.execute('INSERT INTO users(name,token_hash,limit_bytes,days) VALUES(?,?,?,?)',
-                       (name, digest, limit_bytes, days))
+            db.execute('INSERT INTO users(name,token_hash,limit_bytes,days,encrypted_token) VALUES(?,?,?,?,?)',
+                       (name, digest, limit_bytes, days, encrypted))
         return token
 
     def status(self, name: str, now=None) -> Status:
         with self._db() as db:
-            return self._status(self._row(db, name), self._time(now))
+            row = self._row(db, name)
+            if row['deleted']: raise KeyError(name)
+            return self._status(row, self._time(now))
 
     def status_by_token(self, token: str, now=None) -> Status | None:
         try:
@@ -108,14 +144,14 @@ class Quotas:
         except (UnicodeEncodeError, AttributeError):
             return None
         with self._db() as db:
-            row = db.execute('SELECT * FROM users WHERE token_hash=?', (digest,)).fetchone()
+            row = db.execute('SELECT * FROM users WHERE token_hash=? AND deleted=0', (digest,)).fetchone()
             return None if row is None else self._status(row, self._time(now))
 
     def set_enabled(self, name: str, enabled: bool):
         if type(enabled) is not bool:
             raise ValueError('enabled must be bool')
         with self._db() as db:
-            result = db.execute('UPDATE users SET enabled=? WHERE name=?', (int(enabled), name))
+            result = db.execute('UPDATE users SET enabled=? WHERE name=? AND deleted=0', (int(enabled), name))
             if not result.rowcount:
                 raise KeyError(name)
 
@@ -158,16 +194,62 @@ class Quotas:
     def list_users(self, now=None) -> list[Status]:
         with self._db() as db:
             return [self._status(row, self._time(now)) for row in
-                    db.execute('SELECT * FROM users ORDER BY id DESC')]
+                    db.execute('SELECT * FROM users WHERE deleted=0 ORDER BY id DESC')]
 
-    def rotate_token(self, name: str) -> str:
+    def rotate_token(self, name: str, *, remember=False) -> str:
         token = secrets.token_urlsafe(32)
+        encrypted = self._encrypt_token(token) if remember else None
         with self._db() as db:
-            result = db.execute('UPDATE users SET token_hash=? WHERE name=?',
-                                (hashlib.sha256(token.encode('ascii')).hexdigest(), name))
+            result = db.execute('UPDATE users SET token_hash=?,encrypted_token=? WHERE name=? AND deleted=0',
+                                (hashlib.sha256(token.encode('ascii')).hexdigest(), encrypted, name))
             if not result.rowcount:
                 raise KeyError(name)
         return token
+
+    def _encrypt_token(self, token):
+        path = link_key_path(self.path)
+        if not path.exists() and not path.is_symlink():
+            with self._db() as db:
+                if db.execute('SELECT 1 FROM users WHERE encrypted_token IS NOT NULL LIMIT 1').fetchone():
+                    raise TokenStorageError('Restore the missing subscription key before writing new links')
+            try: fd, temp = tempfile.mkstemp(prefix='.link-key-', dir=path.parent)
+            except OSError as error: raise TokenStorageError('Cannot create subscription key') from error
+            try:
+                with os.fdopen(fd,'wb') as out:
+                    out.write(Fernet.generate_key())
+                    out.flush()
+                    os.fsync(out.fileno())
+                try: os.link(temp,path)  # Publish complete bytes, never overwrite an existing key.
+                except FileExistsError: pass
+            except OSError as error:
+                raise TokenStorageError('Cannot create subscription key') from error
+            finally:
+                Path(temp).unlink(missing_ok=True)
+        return Fernet(read_link_key(path)).encrypt(token.encode('ascii')).decode('ascii')
+
+    def remembered_token(self, name):
+        with self._db() as db:
+            row = self._row(db,name)
+            if row['deleted']: raise KeyError(name)
+            if row['encrypted_token'] is None: return None
+            try:
+                token = Fernet(read_link_key(link_key_path(self.path))).decrypt(row['encrypted_token'].encode('ascii')).decode('ascii')
+                if hashlib.sha256(token.encode('ascii')).hexdigest() != row['token_hash']:
+                    raise ValueError('Token mismatch')
+                return token
+            except (InvalidToken, ValueError, UnicodeError) as error:
+                raise TokenStorageError('Subscription link cannot be decrypted') from error
+
+    def delete_user(self, name):
+        # Keep a disabled tombstone: reusing a name could reauthorize its old VPN certificate.
+        with self._db() as db:
+            if not db.execute('UPDATE users SET deleted=1,enabled=0,encrypted_token=NULL,token_hash=? WHERE name=? AND deleted=0',
+                              (hashlib.sha256(secrets.token_bytes(32)).hexdigest(),name)).rowcount:
+                raise KeyError(name)
+
+    def total_traffic(self):
+        with self._db() as db:
+            return db.execute('SELECT COALESCE(SUM(used_bytes),0) FROM users').fetchone()[0]
 
     def update_limits(self, name: str, limit_bytes: int, days: int):
         """Change total allowance, preserving usage and first activation."""
@@ -176,7 +258,7 @@ class Quotas:
         if type(days) is not int or not 1 <= days <= 3650:
             raise ValueError('invalid days')
         with self._db() as db:
-            if not db.execute('UPDATE users SET limit_bytes=?, days=? WHERE name=?',
+            if not db.execute('UPDATE users SET limit_bytes=?, days=? WHERE name=? AND deleted=0',
                               (limit_bytes, days, name)).rowcount:
                 raise KeyError(name)
 

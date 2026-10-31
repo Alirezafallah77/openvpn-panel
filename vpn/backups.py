@@ -12,6 +12,8 @@ import tarfile
 import tempfile
 import time
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+from cryptography.fernet import Fernet, InvalidToken
+from quota import link_key_path, read_link_key, TokenStorageError
 
 MAGIC = b'OVPNPANEL-BACKUP-1\0'
 MAX_ARCHIVE = 45 * 1024**2
@@ -56,6 +58,19 @@ class BoundedBuffer(io.BytesIO):
         return super().write(data)
 
 
+def verify_link_tokens(db, vault):
+    columns={row[1] for row in db.execute('PRAGMA table_info(users)')}
+    if 'encrypted_token' not in columns: return
+    for digest,cipher in db.execute('SELECT token_hash,encrypted_token FROM users WHERE encrypted_token IS NOT NULL'):
+        if vault is None: raise ValueError('Backup is missing the subscription key')
+        try:
+            if not isinstance(cipher,str) or len(cipher)>1024: raise ValueError('Invalid cipher')
+            token=vault.decrypt(cipher.encode('ascii'))
+            if hashlib.sha256(token).hexdigest()!=digest: raise ValueError('Invalid token')
+        except (InvalidToken,ValueError,UnicodeError) as error:
+            raise ValueError('Invalid encrypted link') from error
+
+
 def capture(root=ROOT, database=DATABASE):
     """Caller holds the PKI lock. SQLite backup is transactionally consistent."""
     if database.stat().st_size > MAX_EXPANDED:
@@ -77,6 +92,14 @@ def capture(root=ROOT, database=DATABASE):
             info.size, info.mode = len(manifest), 0o600
             archive.addfile(info, io.BytesIO(manifest))
             archive.add(snapshot, arcname='var/lib/openvpn-panel/quota.sqlite', recursive=False)
+            vault = link_key_path(database)
+            data = read_link_key(vault) if vault.exists() or vault.is_symlink() else None
+            with sqlite3.connect(snapshot) as check:
+                verify_link_tokens(check,Fernet(data) if data is not None else None)
+            if data is not None:
+                info = tarfile.TarInfo('var/lib/openvpn-panel/quota.sqlite.links.key')
+                info.size, info.mode = len(data),0o600
+                archive.addfile(info,io.BytesIO(data))
             for path in sorted(root.rglob('*')):
                 relative = path.relative_to(root)
                 if relative.parts[0] not in ('pki', 'crl.pem', 'tls-crypt.key'):
@@ -116,7 +139,8 @@ def validate_archive(data, stage):
             if total > MAX_EXPANDED:
                 raise ValueError('Expanded archive too large')
             approved = (name in ('manifest.json', 'var/lib/openvpn-panel/quota.sqlite',
-                'etc/openvpn-panel/crl.pem', 'etc/openvpn-panel/tls-crypt.key') or
+                'etc/openvpn-panel/crl.pem', 'etc/openvpn-panel/tls-crypt.key',
+                'var/lib/openvpn-panel/quota.sqlite.links.key') or
                 re.fullmatch(r'etc/openvpn-panel/pki/(?:newcerts/)?[A-Za-z0-9_.-]{1,128}', name))
             # Legacy v0.1 backups include host settings; intentionally never restore them.
             legacy = name in ('etc/openvpn-panel/panel.env', 'etc/openvpn-panel/vpn.json',
@@ -132,6 +156,11 @@ def validate_archive(data, stage):
     manifest = stage / 'manifest.json'
     if manifest.exists() and json.loads(manifest.read_text()).get('format') != 2:
         raise ValueError('Unsupported backup version')
+    vault_path=stage/'var/lib/openvpn-panel/quota.sqlite.links.key'
+    vault=None
+    if vault_path.exists():
+        try: vault=Fernet(read_link_key(vault_path))
+        except TokenStorageError as error: raise ValueError('Invalid subscription key') from error
     db_path = stage / 'var/lib/openvpn-panel/quota.sqlite'
     with sqlite3.connect(f'file:{db_path}?mode=rw', uri=True) as db:
         if db.execute('PRAGMA integrity_check').fetchone()[0] != 'ok':
@@ -144,6 +173,11 @@ def validate_archive(data, stage):
                 type(days) is not int or days <= 0 or type(used) is not int or used < 0 or enabled not in (0, 1) or
                 not re.fullmatch(r'[a-f0-9]{64}', digest) or (first is not None and (type(first) is not int or first < 0))):
                 raise ValueError('Invalid user data')
+        columns={row[1] for row in db.execute('PRAGMA table_info(users)')}
+        if 'deleted' in columns:
+            if db.execute('SELECT 1 FROM users WHERE deleted NOT IN (0,1) OR deleted IS NULL OR (deleted=1 AND enabled!=0)').fetchone():
+                raise ValueError('Invalid deleted-user state')
+        verify_link_tokens(db,vault)
         db.execute('UPDATE sessions SET closed=1')
     pki = stage / 'etc/openvpn-panel/pki'
     for required in ('ca.key', 'ca.crt', 'server.key', 'server.crt', 'index.txt', 'serial', 'crlnumber'):
@@ -181,14 +215,17 @@ def apply_restore(stage, root=ROOT, database=DATABASE, activate=lambda: None, de
         items = [(root/'pki', imported/'pki'), (root/'crl.pem', imported/'crl.pem'),
                  (root/'tls-crypt.key', imported/'tls-crypt.key'),
                  (database, stage/'var/lib/openvpn-panel/quota.sqlite')]
+        source_key=stage/'var/lib/openvpn-panel/quota.sqlite.links.key'
+        target_key=link_key_path(database)
+        if source_key.exists(): items.append((target_key,source_key))
         saved = []
         try:
             for i, (target, source) in enumerate(items):
                 old = rollback / str(i)
-                if target.is_dir():
-                    shutil.copytree(target, old)
-                else:
-                    shutil.copy2(target, old)
+                if target.is_symlink(): raise ValueError('Restore target may not be a symlink')
+                if target.is_dir(): shutil.copytree(target, old)
+                elif target.exists(): shutil.copy2(target, old)
+                else: old=None
                 saved.append((target, old))
                 if target.is_dir():
                     shutil.rmtree(target)
@@ -196,11 +233,15 @@ def apply_restore(stage, root=ROOT, database=DATABASE, activate=lambda: None, de
                 else:
                     shutil.copyfile(source, target)
                     target.chmod(0o660 if target == database else 0o600)
+                    if target==target_key:
+                        owner=database.stat()
+                        os.chown(target,owner.st_uid,owner.st_gid)
             activate()
         except BaseException:
             deactivate()
             for target, old in reversed(saved):
-                if target.is_dir():
+                if old is None: target.unlink(missing_ok=True)
+                elif target.is_dir():
                     shutil.rmtree(target)
                     shutil.copytree(old, target)
                 else:

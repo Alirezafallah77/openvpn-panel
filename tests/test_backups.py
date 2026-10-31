@@ -151,3 +151,43 @@ default_crl_days=365
         data = backups.capture(self.root, self.db)
         with self.assertRaises(subprocess.CalledProcessError):
             self.stage(data)
+
+    def test_encrypted_links_and_deleted_users_survive_restore(self):
+        from quota import link_key_path
+        token=self.q.create_user('remembered',10000,30,remember=True)
+        self.q.delete_user('alice')
+        archive=backups.capture(self.root,self.db)
+        stage=self.stage(archive)
+        root,db=self.target()
+        self.assertFalse(link_key_path(db).exists())
+        backups.apply_restore(stage,root,db)
+        restored=Quotas(str(db))
+        self.assertEqual(restored.remembered_token('remembered'),token)
+        self.assertIsNone(restored.status_by_token(self.token))
+        self.assertEqual([u.name for u in restored.list_users()],['remembered'])
+        self.assertEqual(link_key_path(db).stat().st_mode & 0o077,0)
+        with self.assertRaises(KeyError): restored.set_enabled('alice',True)
+
+    def test_failed_restore_rolls_back_subscription_key(self):
+        from quota import link_key_path
+        token=self.q.create_user('remembered',10000,30,remember=True)
+        stage=self.stage(backups.capture(self.root,self.db))
+        root,db=self.target()
+        existing=Quotas(str(db))
+        old_token=existing.rotate_token('new-user',remember=True)
+        old_key=link_key_path(db).read_bytes()
+        with self.assertRaises(RuntimeError):
+            backups.apply_restore(stage,root,db,activate=Mock(side_effect=RuntimeError('failed')))
+        self.assertEqual(link_key_path(db).read_bytes(),old_key)
+        self.assertEqual(Quotas(str(db)).remembered_token('new-user'),old_token)
+
+    def test_capture_rejects_missing_or_wrong_link_key(self):
+        from quota import link_key_path
+        from cryptography.fernet import Fernet
+        self.q.create_user('remembered',100,30,remember=True)
+        path=link_key_path(self.db)
+        path.unlink()
+        with self.assertRaises(ValueError): backups.capture(self.root,self.db)
+        path.write_bytes(Fernet.generate_key())
+        path.chmod(0o600)
+        with self.assertRaises(ValueError): backups.capture(self.root,self.db)

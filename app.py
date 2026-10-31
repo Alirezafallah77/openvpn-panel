@@ -13,7 +13,7 @@ from threading import Lock
 
 from flask import Flask, jsonify, Response, send_file, abort, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
-from quota import Quotas
+from quota import Quotas, TokenStorageError
 from vpn.client import request_profile, maintenance_request
 from vpn.maintenance import FILENAME
 from metrics import host_metrics, online_users, summaries
@@ -148,7 +148,7 @@ def create_app(config=None):
                                status_filter=status_filter, per_page=per_page, page=page, pages=pages,
                                filtered_total=total, range_start=start+1 if total else 0,
                                range_end=min(start+per_page,total),
-                               stats=summaries(all_users, online), metrics=host_metrics(), online=online)
+                               stats={**summaries(all_users, online), 'traffic': quotas.total_traffic()}, metrics=host_metrics(), online=online)
 
     @app.get('/api/metrics')
     @admin
@@ -167,9 +167,12 @@ def create_app(config=None):
             gib, days = int(gib_text), int(days_text)
             if not 1 <= gib <= 100000 or not 1 <= days <= 3650:
                 raise ValueError()
-            token = quotas.create_user(name, gib * 1024**3, days)
+            token = quotas.create_user(name, gib * 1024**3, days, remember=True)
         except ValueError:
             error = 'نام باید ۱ تا ۶۴ حرف انگلیسی، عدد، خط تیره یا زیرخط باشد؛ حجم و روزها نیز باید در بازهٔ مجاز باشند.'
+        except TokenStorageError:
+            if wants_json: return jsonify(error='ذخیرهٔ امن لینک در دسترس نیست؛ وضعیت فایل کلید را بررسی کنید.'),503
+            return render_template('message.html',error='ذخیرهٔ امن لینک در دسترس نیست؛ با پشتیبانی بررسی کنید.'),503
         except sqlite3.IntegrityError:
             error = 'این نام قبلاً ثبت شده است؛ نام دیگری انتخاب کنید.'
         if error:
@@ -207,10 +210,16 @@ def create_app(config=None):
     @admin
     def rotate(name):
         try:
-            token = quotas.rotate_token(name)
+            token = quotas.rotate_token(name, remember=True)
             app.logger.info('Admin rotated status link user=%s', name)
+        except TokenStorageError:
+            if request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+                return jsonify(error='ذخیرهٔ امن لینک در دسترس نیست؛ لینک قبلی تغییر نکرده است.'),503
+            return render_template('message.html',error='ذخیرهٔ امن لینک در دسترس نیست؛ لینک قبلی تغییر نکرده است.'),503
         except KeyError:
             abort(404)
+        if request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']:
+            return jsonify(subscription_url=url_for('subscription',token=token,_external=True))
         return render_template('message.html', token=token, name=name)
 
     @app.post('/users/<name>/limits')
@@ -225,6 +234,45 @@ def create_app(config=None):
         except KeyError:
             abort(404)
         return return_to_user_list()
+
+    def list_context():
+        return dict(search=request.args.get('q','')[:64], status_filter=request.args.get('status','all')[:20],
+                    per_page=request.args.get('per_page','20')[:3], page=request.args.get('page','1')[:12])
+
+    @app.get('/users/<name>/edit')
+    @admin
+    def edit_user(name):
+        try: state=quotas.status(name)
+        except KeyError: abort(404)
+        return render_template('user_edit.html',user=state,**list_context())
+
+    @app.route('/users/<name>/delete',methods=['GET','POST'])
+    @admin
+    def delete_user(name):
+        try: state=quotas.status(name)
+        except KeyError: abort(404)
+        if request.method=='POST':
+            if request.form.get('confirm')!='1' or request.form.get('confirm_name')!=name:
+                abort(400,description='برای حذف، نام کاربر و تأیید را وارد کنید.')
+            quotas.delete_user(name)
+            app.logger.info('Admin deleted user=%s',name)
+            return return_to_user_list()
+        return render_template('user_delete.html',user=state,**list_context())
+
+    @app.post('/users/<name>/link')
+    @admin
+    def copy_user_link(name):
+        wants_json=request.accept_mimetypes['application/json'] > request.accept_mimetypes['text/html']
+        try: token=quotas.remembered_token(name)
+        except KeyError: abort(404)
+        except TokenStorageError:
+            if wants_json: return jsonify(error='کلید ذخیرهٔ لینک در دسترس نیست؛ لینک قبلی تغییر نکرده است.'),503
+            return render_template('message.html',error='کلید ذخیرهٔ لینک در دسترس نیست؛ لینک قبلی تغییر نکرده است.'),503
+        if token is None:
+            if wants_json: return jsonify(needs_rotation=True,error='این لینک قدیمی فقط به‌صورت هش ذخیره شده؛ برای صدور لینک قابل کپی، تأیید ابطال لینک قبلی لازم است.'),409
+            return render_template('legacy_link.html',name=name)
+        if wants_json: return jsonify(subscription_url=url_for('subscription',token=token,_external=True))
+        return render_template('message.html',token=token,name=name)
 
     @app.post('/users/<name>/profile')
     @admin

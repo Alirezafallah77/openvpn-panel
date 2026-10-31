@@ -136,3 +136,59 @@ if (liveMetrics) {
   timer = setTimeout(updateMetrics, 5000);
   document.addEventListener('visibilitychange', () => { if (!document.hidden && !pending) updateMetrics(); });
 }
+document.querySelectorAll('[data-copy-user-link]').forEach(form => {
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const button=form.querySelector('button');
+    if (button.disabled) return;
+    button.disabled=true;
+    const result=form.closest('td').querySelector('[data-row-link-result]');
+    result.replaceChildren();
+    const message=document.createElement('p'); message.setAttribute('role','status');
+    result.append(message);
+    try {
+      async function send(url) {
+        const response=await fetch(url,{method:'POST',body:new FormData(form),credentials:'same-origin',headers:{Accept:'application/json'}});
+        if (response.redirected || !response.headers.get('Content-Type')?.includes('application/json')) throw new Error('نشست یا پاسخ معتبر نیست؛ دوباره وارد پنل شوید.');
+        return {response,data:await response.json()};
+      }
+      let {response,data}=await send(form.action);
+      if (response.status===409 && data.needs_rotation) {
+        if (!window.confirm('لینک این کاربر در نسخهٔ قدیمی فقط به‌صورت هش ذخیره شده است. لینک قبلی باطل و یک لینک جدید قابل کپی صادر شود؟ فایل VPN تغییر نمی‌کند.')) {
+          message.textContent='لغو شد؛ لینک قبلی تغییر نکرد.'; return;
+        }
+        ({response,data}=await send(form.dataset.rotateUrl));
+      }
+      if (!response.ok) throw new Error(data.error || 'دریافت لینک ناموفق بود.');
+      const input=document.createElement('input'); input.readOnly=true; input.dir='ltr';input.className='share-input';input.value=data.subscription_url;input.setAttribute('aria-label','لینک اشتراک');
+      result.prepend(input);
+      try { await navigator.clipboard.writeText(input.value);message.textContent='لینک ساب کپی شد.'; }
+      catch (_) { input.focus();input.select();message.textContent='لینک انتخاب شد؛ با Copy یا Ctrl+C کپی کنید.'; }
+    } catch (_) { message.textContent='دریافت لینک ناموفق بود؛ نشست، ارتباط یا کلید ذخیرهٔ لینک را بررسی کنید. در خطای ارتباط بعد از صدور، دوباره کپی را بزنید؛ لینک جدید ذخیره شده و دوباره باطل نمی‌شود.'; }
+    finally { button.disabled=false; }
+  });
+});
+const userDialog=document.getElementById('user-action-dialog');
+if (userDialog && typeof userDialog.showModal==='function') {
+  let loading=false;
+  userDialog.querySelector('[data-close-user-dialog]').addEventListener('click',()=>userDialog.close());
+  document.querySelectorAll('[data-user-dialog]').forEach(link=>link.addEventListener('click',async event=>{
+    if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    if (loading) return;
+    loading=true;
+    try {
+      const response=await fetch(link.href,{credentials:'same-origin'});
+      if (!response.ok || response.redirected) throw new Error('unavailable');
+      const page=new DOMParser().parseFromString(await response.text(),'text/html');
+      const panel=page.querySelector('.action-panel');
+      if (!panel) throw new Error('missing action');
+      const content=userDialog.querySelector('[data-dialog-content]');
+      content.replaceChildren(document.importNode(panel,true));
+      content.querySelectorAll('[data-action-cancel]').forEach(cancel=>cancel.addEventListener('click',e=>{e.preventDefault();userDialog.close();}));
+      userDialog.showModal();
+      content.querySelector('input:not([type=hidden])')?.focus();
+    } catch (_) { window.location.assign(link.href); }
+    finally { loading=false; }
+  }));
+}

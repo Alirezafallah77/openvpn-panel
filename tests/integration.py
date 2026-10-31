@@ -187,6 +187,12 @@ def main():
                 '--output','/tmp/vpn-protocol-proof.txt','https://github.com/robots.txt')
         print('PASS: UDP/TCP switching preserves users and serves internet on both transports',flush=True)
         # Web-managed encryption; no real Telegram token or public bot required.
+        def copied_token():
+            page=post('/users/e2e/link',{}).decode()
+            return re.search(r'/s/([A-Za-z0-9_-]{43})',page).group(1)
+        assert copied_token()==token
+        assert copied_token()==token
+        print('PASS: repeat copy does not rotate the subscription link',flush=True)
         migration_password = 'migration-test-passphrase-123'
         post('/backups/settings', dict(password=PASSWORD, interval='15', enabled='0',
                                       passphrase=migration_password, passphrase_repeat=migration_password, token='', chat_id=''))
@@ -234,6 +240,8 @@ def main():
         assert Path('/etc/openvpn-panel/vpn.json').read_bytes() == endpoint_before
         assert Path('/etc/openvpn-panel/panel.env').read_bytes() == env_before
         assert opener.open(BASE + '/s/' + token).status == 200
+        assert copied_token()==token
+        print('PASS: copied link decrypts as web user after restore',flush=True)
         client = start_client()
         wait_for(connected, 'restored certificate and users reconnect after migration')
         print('PASS: validated restore preserves new host settings and old user links', flush=True)
@@ -244,6 +252,16 @@ def main():
             assert archive.getmember('etc/openvpn-panel/pki/ca.key').size > 0
         assert os.stat('/root/panel-ci-backup.tar.gz').st_mode & 0o077 == 0
         print('PASS: consistent private backup created', flush=True)
+        post('/users/e2e/delete',dict(confirm='1',confirm_name='e2e'))
+        wait_for(no_open_session,'deleted connected user is disconnected by accounting')
+        assert not q.list_users()
+        assert q.status_by_token(token) is None
+        client.terminate()
+        client.wait(timeout=10)
+        client=start_client()
+        time.sleep(8)
+        assert not connected(),'deleted certificate reconnected'
+        print('PASS: deletion hides user, invalidates link and blocks old certificate',flush=True)
         cmd('/usr/local/sbin/openvpn-panelctl', 'restart')
         wait_for(lambda: subprocess.run(['systemctl', 'is-active', '--quiet', 'openvpn-server@panel.service']).returncode == 0,
                  'maintenance restart restores VPN')
