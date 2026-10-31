@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenVPN management web panel
+After=network.target
+
+[Service]
+Type=simple
+User=openvpn-panel
+Group=openvpn-panel
+WorkingDirectory=/opt/openvpn-panel
+EnvironmentFile=/etc/openvpn-panel/panel.env
+ExecStart=/opt/openvpn-panel/.venv/bin/gunicorn --workers 1 --threads 4 --bind 127.0.0.1:8000 --timeout 150 app:create_app()
+Restart=on-failure
+RestartSec=5
+UMask=0007
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/openvpn-panel
+# NoNewPrivileges cannot be enabled: one tightly scoped sudo PKI helper is used.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

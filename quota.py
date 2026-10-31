@@ -154,3 +154,70 @@ class Quotas:
                 db.execute('UPDATE sessions SET rx=?,tx=?,closed=? WHERE id=?', (rx,tx,int(final),session_id))
             row = db.execute('SELECT * FROM users WHERE id=?', (session['user_id'],)).fetchone()
             return self._status(row, self._time(now))
+
+    def list_users(self, now=None) -> list[Status]:
+        with self._db() as db:
+            return [self._status(row, self._time(now)) for row in
+                    db.execute('SELECT * FROM users ORDER BY id DESC')]
+
+    def rotate_token(self, name: str) -> str:
+        token = secrets.token_urlsafe(32)
+        with self._db() as db:
+            result = db.execute('UPDATE users SET token_hash=? WHERE name=?',
+                                (hashlib.sha256(token.encode('ascii')).hexdigest(), name))
+            if not result.rowcount:
+                raise KeyError(name)
+        return token
+
+    def update_limits(self, name: str, limit_bytes: int, days: int):
+        """Change total allowance, preserving usage and first activation."""
+        if type(limit_bytes) is not int or not 1 <= limit_bytes <= 100000 * 1024**3:
+            raise ValueError('invalid volume')
+        if type(days) is not int or not 1 <= days <= 3650:
+            raise ValueError('invalid days')
+        with self._db() as db:
+            if not db.execute('UPDATE users SET limit_bytes=?, days=? WHERE name=?',
+                              (limit_bytes, days, name)).rowcount:
+                raise KeyError(name)
+
+    def reset_sessions(self):
+        """Only run before starting a new OpenVPN process (old counters are gone)."""
+        with self._db() as db:
+            db.execute('UPDATE sessions SET closed=1 WHERE closed=0')
+
+    def vpn_connect(self, name: str, address: str, now=None):
+        """One active connection per certificate. Transport identity is root supplied."""
+        now = self._time(now)
+        with self._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = self._row(db, name)
+            state = self._status(row, now)
+            if not state.allowed:
+                raise PermissionError(state.reason)
+            if db.execute('SELECT 1 FROM sessions WHERE user_id=? AND closed=0', (row['id'],)).fetchone():
+                raise PermissionError('already_connected')
+            # Reusing a UDP source address after a disconnect must not reuse counters.
+            sid = name + '|' + address
+            db.execute('DELETE FROM sessions WHERE id=? AND closed=1', (sid,))
+            db.execute('INSERT INTO sessions(id,user_id) VALUES(?,?)', (sid, row['id']))
+            # client-connect runs after certificate authentication, before tunnel admission.
+            db.execute('UPDATE users SET first_connected=COALESCE(first_connected, ?) WHERE id=?',
+                       (now, row['id']))
+
+    def vpn_account(self, name: str, address: str, rx: int, tx: int, *, final=False, now=None):
+        """Snapshot/final-hook race safe: a stale snapshot never decreases counters."""
+        if any(type(x) is not int or x < 0 or x > 2**62 for x in (rx, tx)):
+            raise ValueError('invalid counters')
+        with self._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            row = self._row(db, name)
+            sid = name + '|' + address
+            s = db.execute('SELECT * FROM sessions WHERE id=? AND user_id=?', (sid, row['id'])).fetchone()
+            if s is None:
+                raise KeyError('untracked connection')
+            if not s['closed']:
+                rx, tx = max(rx, s['rx']), max(tx, s['tx'])
+                delta = rx - s['rx'] + tx - s['tx']
+                db.execute('UPDATE users SET used_bytes=used_bytes+? WHERE id=?', (delta, row['id']))
+                db.execute('UPDATE sessions SET rx=?,tx=?,closed=? WHERE id=?', (rx, tx, int(final), sid))
+            return self._status(self._row(db, name), self._time(now))

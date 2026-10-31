@@ -1,0 +1,14 @@
+[Unit]
+Description=OpenVPN panel dedicated firewall rules
+After=network-online.target
+Wants=network-online.target
+Before=openvpn-server@panel.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/openvpn-panel-network start
+ExecStop=/usr/local/sbin/openvpn-panel-network stop
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

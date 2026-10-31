@@ -1,0 +1,2 @@
+<!doctype html>
+<html lang="fa" dir="rtl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>مدیریت OpenVPN</title><link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}"></head><body><main><header><h1>مدیریت OpenVPN</h1><span>نسخهٔ توسعه • Ubuntu 24.04</span></header>{% if not vpn_configured %}<aside>حالت توسعه: اتصال به OpenVPN تنظیم نشده است؛ مصرف واقعی ثبت نمی‌شود.</aside>{% endif %}{% block content %}{% endblock %}</main></body></html>

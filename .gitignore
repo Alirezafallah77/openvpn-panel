@@ -7,3 +7,6 @@ __pycache__/
 *.pem
 *.crt
 *.ovpn
+
+.venv/
+instance/

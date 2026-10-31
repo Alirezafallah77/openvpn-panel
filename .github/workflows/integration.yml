@@ -1,0 +1,27 @@
+name: Ubuntu installation and real VPN
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  vpn:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Enable TUN and install a fresh instance
+        run: |
+          sudo modprobe tun
+          echo 'integration-only-password-123' | sudo tee /root/panel-test-password >/dev/null
+          sudo chmod 600 /root/panel-test-password
+          sudo bash scripts/install.sh --endpoint 192.0.2.1 --password-file /root/panel-test-password
+      - name: Test real VPN and quota enforcement
+        run: sudo /opt/openvpn-panel/.venv/bin/python tests/integration.py
+      - name: Diagnostics (no profiles, tokens or keys)
+        if: failure()
+        run: |
+          sudo systemctl status openvpn-panel openvpn-panel-accounting openvpn-server@panel --no-pager || true
+          sudo journalctl -u openvpn-panel -u openvpn-panel-accounting -u openvpn-server@panel --no-pager -n 150
+          sudo tail -n 80 /tmp/e2e-client.log || true

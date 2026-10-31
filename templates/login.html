@@ -1,0 +1,1 @@
+{% extends 'base.html' %}{% block content %}<section><h2>ورود مدیر</h2>{% if error %}<p role="alert">{{ error }}</p>{% endif %}<form method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><label>رمز عبور<input type="password" name="password" autocomplete="current-password" required maxlength="256"></label><button>ورود امن</button></form></section>{% endblock %}

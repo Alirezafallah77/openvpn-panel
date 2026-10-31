@@ -1,0 +1,23 @@
+[Unit]
+Description=OpenVPN live quota enforcement
+Before=openvpn-server@panel.service
+
+[Service]
+Type=simple
+User=root
+Group=openvpn-panel
+WorkingDirectory=/opt/openvpn-panel
+ExecStart=/opt/openvpn-panel/.venv/bin/python -Es /opt/openvpn-panel/collector_entry.py
+RuntimeDirectory=openvpn-panel
+RuntimeDirectoryMode=0700
+UMask=0007
+Restart=no
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/openvpn-panel /run/openvpn-panel
+RestrictAddressFamilies=AF_UNIX
+
+[Install]
+WantedBy=multi-user.target
