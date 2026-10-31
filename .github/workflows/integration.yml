@@ -15,19 +15,26 @@ jobs:
       matrix:
         mode: [ssh, https]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Enable TUN and install a fresh instance
         run: |
           sudo modprobe tun
           # Only this disposable runner: exercise a fresh-server installation.
           sudo ufw disable
-          sudo systemctl stop ufw
           echo 'integration-only-password-123' | sudo tee /root/panel-test-password >/dev/null
           sudo chmod 600 /root/panel-test-password
           set -o pipefail
           ARGS=()
           if [[ '${{ matrix.mode }}' == https ]]; then ARGS+=(--domain panel.example.invalid); fi
           sudo bash scripts/install.sh --endpoint 192.0.2.1 --password-file /root/panel-test-password "${ARGS[@]}" 2>&1 | tee /tmp/panel-install.log
+      - name: Refuse reinstall without overwriting CA
+        run: |
+          BEFORE=$(sudo sha256sum /etc/openvpn-panel/pki/ca.key)
+          if sudo bash scripts/install.sh --endpoint 192.0.2.1 --password-file /root/panel-test-password; then
+            echo 'Unsafe reinstall unexpectedly succeeded'; exit 1
+          fi
+          AFTER=$(sudo sha256sum /etc/openvpn-panel/pki/ca.key)
+          test "$BEFORE" = "$AFTER"
       - name: Configure private test HTTPS CA (no public DNS or ACME required)
         if: matrix.mode == 'https'
         run: |

@@ -107,3 +107,5 @@ PANEL_LOCAL_HTTP=1 .venv/bin/python -m flask --app 'app:create_app()' run --host
 ```
 
 بدون `PANEL_VPN_CONFIGURED=1` صفحات در حالت توسعه و بدون اتصال واقعی به VPN هستند. متغیرهای نصب واقعی در `/etc/openvpn-panel/panel.env` قرار دارند و نباید وارد Git شوند.
+
+گزارش آزمون‌های اجراشده و محدودیت پوشش: [docs/TESTING.md](docs/TESTING.md).

@@ -33,7 +33,7 @@ source /etc/os-release
 if find /etc/openvpn -type f \( -name '*.conf' -o -name '*.ovpn' \) -print -quit 2>/dev/null | grep -q .; then
   echo 'Existing OpenVPN configuration detected. Use a new server.' >&2; exit 1
 fi
-if systemctl is-active --quiet ufw || systemctl is-active --quiet firewalld; then
+if { [[ -r /etc/ufw/ufw.conf ]] && grep -Eq '^[[:space:]]*ENABLED[[:space:]]*=[[:space:]]*yes([[:space:]]|$)' /etc/ufw/ufw.conf; } || systemctl is-active --quiet firewalld; then
   echo 'Active UFW/firewalld detected. Use a dedicated fresh server; do not disable an existing firewall blindly.' >&2; exit 1
 fi
 if [[ -n $DOMAIN && -e /etc/caddy/Caddyfile ]]; then
