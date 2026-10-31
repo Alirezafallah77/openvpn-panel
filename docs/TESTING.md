@@ -93,7 +93,7 @@
 
 ### Panel address and locale feature verification
 
-- Local Python suite: **99 tests passing**, including mount isolation, public
+- Local Python suite: **100 tests passing**, including mount isolation, public
   subscription/profile/static URL generation, admin/CSRF/password requirements,
   browser preference isolation and safe redirects, English template compilation,
   Gregorian/Jalali known boundaries and invalid leap days, unchanged activation
@@ -110,3 +110,18 @@
   asset availability, browser preference changes and SSH snapshot rollback before
   the existing real OpenVPN/backup/migration checks. See the feature commit's
   GitHub Actions result for live Ubuntu evidence; local mocks are not a substitute.
+
+
+Verified on functional commit `f51e1f3`:
+
+- Ubuntu 24.04 integration run [41225339795](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/41225339795):
+  **success** in SSH, HTTPS and legacy-upgrade modes. Diagnostics confirm the real
+  address transaction, old admin 404, retained subscriptions/assets, browser
+  preferences and SSH rollback, followed by all existing VPN/quota/migration tests.
+  The HTTPS mode exercises port 5000 with a trusted **private test CA**, not public
+  DNS/ACME issuance or the operator's external firewall.
+- Python 3.12/3.13 and Node run [41225339786](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/41225339786):
+  **success** (100 Python tests and 7 theme tests).
+- Added regression coverage for SSL Management's pending URL retaining the current
+  custom port/path; upgraded catalogs have explicit world-readable code-file
+  permissions so the unprivileged web worker can read them.
