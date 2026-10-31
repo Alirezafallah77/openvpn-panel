@@ -99,6 +99,8 @@ sudo journalctl -u openvpn-panel -u openvpn-panel-pki -u openvpn-panel-accountin
 sudo systemctl list-timers openvpn-panel-backup.timer
 ```
 
+لاگ خطای reverse proxy در زمان خاموش‌بودن وب ممکن است مسیر درخواست، از جمله توکن لینک وضعیت را داشته باشد؛ لاگ‌ها را محرمانه نگه دارید و پیش از اشتراک‌گذاری توکن‌ها و IPها را حذف کنید.
+
 در خطای نصب نیمه‌تمام، داده/CA را برای عبور از پیش‌بررسی پاک نکنید. روی VPS تازهٔ بدون داده، بازسازی VPS بعد از بررسی علت امن‌تر از حذف کور فایل‌هاست. برای خطای VPN، دیسک، مجوزها و journal را بررسی و بعد `openvpn-panelctl restart` کنید؛ heartbeat/hook را دستی دور نزنید.
 
 ## حذف
