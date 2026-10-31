@@ -95,3 +95,20 @@ document.querySelectorAll('[data-create-user]').forEach(form => {
     }
   });
 });
+// Store only the visual preference; never store credentials or subscription links.
+const themeButton = document.querySelector('[data-theme-toggle]');
+if (themeButton) {
+  function applyTheme(theme) {
+    document.body.dataset.theme = theme;
+    themeButton.textContent = theme === 'dark' ? '☀ حالت روشن' : '☾ حالت تیره';
+    themeButton.setAttribute('aria-label', theme === 'dark' ? 'فعال‌کردن پوستهٔ روشن' : 'فعال‌کردن پوستهٔ تیره');
+  }
+  let theme = 'dark';
+  try { if (localStorage.getItem('panel-theme') === 'light') theme = 'light'; } catch (_) {}
+  applyTheme(theme);
+  themeButton.addEventListener('click', () => {
+    const next = document.body.dataset.theme === 'dark' ? 'light' : 'dark';
+    applyTheme(next);
+    try { localStorage.setItem('panel-theme', next); } catch (_) {}
+  });
+}

@@ -118,8 +118,36 @@ def create_app(config=None):
         all_users = quotas.list_users()
         search = request.args.get('q', '').strip()[:64]
         online = online_users(app.config['ONLINE_SNAPSHOT'])
-        users = [u for u in all_users if search.casefold() in u.name.casefold()]
+        status_filter = request.args.get('status', 'all')
+        valid_filters = ('all', 'active', 'disabled', 'expired', 'limited', 'online', 'near_limit', 'near_expiry')
+        if status_filter not in valid_filters:
+            status_filter = 'all'
+        per_page = request.args.get('per_page', str(session.get('users_per_page',20)))
+        per_page = int(per_page) if per_page in ('20','50','100') else 20
+        session['users_per_page'] = per_page
+        try:
+            page = max(1, int(request.args.get('page','1')[:12]))
+        except ValueError:
+            page = 1
+        checks = {
+            'all': lambda u: True, 'active': lambda u: u.allowed,
+            'disabled': lambda u: not u.enabled,
+            'expired': lambda u: u.remaining_seconds is not None and u.remaining_seconds <= 0,
+            'limited': lambda u: u.remaining_bytes == 0,
+            'online': lambda u: online is not None and u.name in online,
+            'near_limit': lambda u: u.allowed and u.remaining_bytes <= u.limit_bytes * 0.1,
+            'near_expiry': lambda u: u.allowed and u.remaining_seconds is not None and u.remaining_seconds <= 3 * 86400,
+        }
+        filtered = [u for u in all_users if search.casefold() in u.name.casefold() and checks[status_filter](u)]
+        total = len(filtered)
+        pages = max(1, (total + per_page - 1) // per_page)
+        page = min(page, pages)
+        start = (page - 1) * per_page
+        users = filtered[start:start+per_page]
         return render_template('dashboard.html', users=users, search=search,
+                               status_filter=status_filter, per_page=per_page, page=page, pages=pages,
+                               filtered_total=total, range_start=start+1 if total else 0,
+                               range_end=min(start+per_page,total),
                                stats=summaries(all_users, online), metrics=host_metrics(), online=online)
 
     @app.post('/users')
@@ -151,6 +179,12 @@ def create_app(config=None):
         return render_template('message.html', token=token, name=name, create_another=True,
                                form_gib=gib, form_days=days)
 
+    def return_to_user_list():
+        # Only fixed local route + bounded query fields; never accept a redirect URL.
+        return redirect(url_for('dashboard', q=request.form.get('q','')[:64],
+            status=request.form.get('status','all')[:20], per_page=request.form.get('per_page','20')[:3],
+            page=request.form.get('page','1')[:12], _anchor='users'))
+
     @app.post('/users/<name>/toggle')
     @admin
     def toggle(name):
@@ -162,7 +196,7 @@ def create_app(config=None):
             app.logger.info('Admin set enabled=%s user=%s', value, name)
         except KeyError:
             abort(404)
-        return redirect(url_for('dashboard'))
+        return return_to_user_list()
 
     @app.post('/users/<name>/token')
     @admin
@@ -185,7 +219,7 @@ def create_app(config=None):
             abort(400)
         except KeyError:
             abort(404)
-        return redirect(url_for('dashboard'))
+        return return_to_user_list()
 
     @app.post('/users/<name>/profile')
     @admin
