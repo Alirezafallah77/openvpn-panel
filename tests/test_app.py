@@ -1,6 +1,7 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from werkzeug.security import generate_password_hash
 from app import create_app
 
@@ -93,3 +94,27 @@ class WebTests(unittest.TestCase):
     def test_configuration_requires_secrets(self):
         with self.assertRaises(RuntimeError):
             create_app({'SECRET_KEY': 'short'})
+
+    def test_profile_download_and_broker_failure(self):
+        self.login()
+        self.q.create_user('alice', 100, 2)
+        self.assertEqual(self.post('/users/alice/profile').status_code, 503)
+        self.app.config['VPN_CONFIGURED'] = True
+        with patch('app.request_profile', return_value='client\n<key>secret</key>'):
+            response = self.post('/users/alice/profile')
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('attachment', response.headers['Content-Disposition'])
+            self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        with patch('app.request_profile', side_effect=OSError('failed')):
+            self.assertEqual(self.post('/users/alice/profile').status_code, 503)
+        self.assertEqual(self.post('/users/alice/profile', dict(action='shell')).status_code, 400)
+
+    def test_web_limits_preserve_activation(self):
+        self.login()
+        self.q.create_user('alice', 100, 2)
+        self.q.connect('alice', 'one', now=100)
+        self.q.account('one', 10, 20)
+        self.assertEqual(self.post('/users/alice/limits', dict(gib='5', days='30')).status_code, 302)
+        state = self.q.status('alice')
+        self.assertEqual((state.used_bytes, state.first_connected, state.days), (30, 100, 30))
+        self.assertEqual(self.post('/users/alice/limits', dict(gib='0', days='30')).status_code, 400)

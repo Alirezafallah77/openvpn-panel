@@ -4,8 +4,7 @@ import os
 import re
 import secrets
 import sqlite3
-import json
-import socket
+import logging
 import time
 from datetime import timedelta
 from functools import wraps
@@ -15,10 +14,12 @@ from threading import Lock
 from flask import Flask, Response, abort, redirect, render_template, request, session, url_for
 from werkzeug.security import check_password_hash
 from quota import Quotas
+from vpn.client import request_profile
 
 
 def create_app(config=None):
     app = Flask(__name__)
+    app.logger.setLevel(logging.INFO)
     app.config.from_mapping(
         SECRET_KEY=os.environ.get('PANEL_SECRET'),
         ADMIN_PASSWORD_HASH=os.environ.get('PANEL_PASSWORD_HASH'),
@@ -119,6 +120,7 @@ def create_app(config=None):
             token = quotas.create_user(name, gib * 1024**3, days)
         except (ValueError, sqlite3.IntegrityError):
             return render_template('message.html', error='نام تکراری یا مقادیر نامعتبر است.'), 400
+        app.logger.info('Admin created user=%s', name)
         return render_template('message.html', token=token, name=name)
 
     @app.post('/users/<name>/toggle')
@@ -129,6 +131,7 @@ def create_app(config=None):
             abort(400)
         try:
             quotas.set_enabled(name, value == '1')
+            app.logger.info('Admin set enabled=%s user=%s', value, name)
         except KeyError:
             abort(404)
         return redirect(url_for('dashboard'))
@@ -138,6 +141,7 @@ def create_app(config=None):
     def rotate(name):
         try:
             token = quotas.rotate_token(name)
+            app.logger.info('Admin rotated status link user=%s', name)
         except KeyError:
             abort(404)
         return render_template('message.html', token=token, name=name)
@@ -148,6 +152,7 @@ def create_app(config=None):
         try:
             quotas.update_limits(name, int(request.form.get('gib', '')) * 1024**3,
                                  int(request.form.get('days', '')))
+            app.logger.info('Admin changed allowance user=%s', name)
         except ValueError:
             abort(400)
         except KeyError:
@@ -169,21 +174,12 @@ def create_app(config=None):
         if action not in ('download', 'rotate'):
             abort(400)
         try:
-            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
-                connection.settimeout(120)
-                connection.connect('/run/openvpn-panel-pki/broker.sock')
-                connection.sendall(json.dumps(dict(name=name, action=action)).encode() + b'\n')
-                with connection.makefile('rb') as stream:
-                    raw = stream.readline(65537)
-                if len(raw) > 65536 or not raw.endswith(b'\n'):
-                    raise ValueError('invalid broker response')
-                result = json.loads(raw)
-                if result.get('ok') is not True or not isinstance(result.get('profile'), str):
-                    raise ValueError('profile unavailable')
+            profile = request_profile(name, action)
         except (ValueError, OSError):
             app.logger.error('VPN profile helper failed')
             return render_template('message.html', error='ساخت فایل اتصال ناموفق بود؛ وضعیت سرویس و PKI را بررسی کنید.'), 503
-        return Response(result['profile'], mimetype='application/x-openvpn-profile', headers={
+        app.logger.info('Admin profile operation=%s user=%s', action, name)
+        return Response(profile, mimetype='application/x-openvpn-profile', headers={
             'Content-Disposition': f'attachment; filename="{name}.ovpn"'})
 
     @app.get('/s/<token>')

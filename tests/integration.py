@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import re
 import socket
+import ssl
 import subprocess
 import sys
 import time
@@ -17,7 +18,7 @@ import urllib.request
 sys.path.insert(0, '/opt/openvpn-panel')
 from quota import Quotas
 
-BASE = 'http://localhost:8000'
+BASE = os.environ.get('PANEL_TEST_BASE', 'http://localhost:8000')
 PASSWORD = 'integration-only-password-123'
 
 
@@ -36,7 +37,11 @@ def wait_for(predicate, description, timeout=40):
 
 
 def main():
-    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    handlers = [urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()),
+                urllib.request.ProxyHandler({})]
+    if os.environ.get('PANEL_TEST_CA'):
+        handlers.append(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=os.environ['PANEL_TEST_CA'])))
+    opener = urllib.request.build_opener(*handlers)
 
     def post(path, data):
         page = opener.open(BASE + '/login').read().decode()
@@ -130,6 +135,16 @@ def main():
         Path('/tmp/e2e.ovpn').write_bytes(new_profile)
         client = start_client()
         wait_for(connected, 'replacement certificate connects')
+        cmd('/usr/local/sbin/openvpn-panelctl', 'backup', '/root/panel-ci-backup.tar.gz')
+        import tarfile
+        with tarfile.open('/root/panel-ci-backup.tar.gz') as archive:
+            assert archive.getmember('var/lib/openvpn-panel/quota.sqlite').size > 0
+            assert archive.getmember('etc/openvpn-panel/pki/ca.key').size > 0
+        assert os.stat('/root/panel-ci-backup.tar.gz').st_mode & 0o077 == 0
+        print('PASS: consistent private backup created', flush=True)
+        cmd('/usr/local/sbin/openvpn-panelctl', 'restart')
+        wait_for(lambda: subprocess.run(['systemctl', 'is-active', '--quiet', 'openvpn-server@panel.service']).returncode == 0,
+                 'maintenance restart restores VPN')
         cmd('systemctl', 'kill', '--signal=SIGKILL', 'openvpn-panel-accounting.service')
         wait_for(lambda: subprocess.run(['systemctl', 'is-active', '--quiet', 'openvpn-server@panel.service']).returncode != 0,
                  'accounting failure stops OpenVPN (fail closed)')

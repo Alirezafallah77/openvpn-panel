@@ -109,10 +109,12 @@ def main():
             enforce(quotas, management)
             # A second snapshot ensures the killed connection is absent before
             # admitting the replacement certificate with the same common name.
-            live = {row[0] for row in management.status()}
-            for marker in REVOCATIONS.glob('revoke-*'):
-                if marker.name[7:] not in live:
-                    marker.unlink(missing_ok=True)
+            pending = list(REVOCATIONS.glob('revoke-*'))
+            if pending:
+                live = {row[0] for row in management.status()}
+                for marker in pending:
+                    if marker.name[7:] not in live:
+                        marker.unlink(missing_ok=True)
             Path(HEARTBEAT).touch(mode=0o600)
             time.sleep(2)
     finally:

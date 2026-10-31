@@ -10,6 +10,10 @@ jobs:
   vpn:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [ssh, https]
     steps:
       - uses: actions/checkout@v4
       - name: Enable TUN and install a fresh instance
@@ -21,11 +25,22 @@ jobs:
           echo 'integration-only-password-123' | sudo tee /root/panel-test-password >/dev/null
           sudo chmod 600 /root/panel-test-password
           set -o pipefail
-          sudo bash scripts/install.sh --endpoint 192.0.2.1 --password-file /root/panel-test-password 2>&1 | tee /tmp/panel-install.log
+          ARGS=()
+          if [[ '${{ matrix.mode }}' == https ]]; then ARGS+=(--domain panel.example.invalid); fi
+          sudo bash scripts/install.sh --endpoint 192.0.2.1 --password-file /root/panel-test-password "${ARGS[@]}" 2>&1 | tee /tmp/panel-install.log
+      - name: Configure private test HTTPS CA (no public DNS or ACME required)
+        if: matrix.mode == 'https'
+        run: |
+          echo '127.0.0.1 panel.example.invalid' | sudo tee -a /etc/hosts
+          sudo sed -i '/reverse_proxy/i\    tls internal' /etc/caddy/Caddyfile
+          sudo systemctl restart caddy
+          echo 'PANEL_TEST_BASE=https://panel.example.invalid' >> "$GITHUB_ENV"
+          echo 'PANEL_TEST_CA=/var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt' >> "$GITHUB_ENV"
+          sudo curl --fail --retry 10 --retry-delay 1 --retry-connrefused --cacert /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt https://panel.example.invalid/login --noproxy '*' > /dev/null
       - name: Test real VPN and quota enforcement
         run: |
           set -o pipefail
-          sudo /opt/openvpn-panel/.venv/bin/python tests/integration.py 2>&1 | tee /tmp/panel-e2e.log
+          sudo --preserve-env=PANEL_TEST_BASE,PANEL_TEST_CA /opt/openvpn-panel/.venv/bin/python tests/integration.py 2>&1 | tee /tmp/panel-e2e.log
       - name: Diagnostics (no profiles, tokens or keys)
         if: failure()
         run: |
@@ -46,7 +61,7 @@ jobs:
               path = pathlib.Path(filename)
               if path.exists():
                   sections.append('### ' + path.name + '\n```text\n' + path.read_text(errors='replace')[-10000:] + '\n```')
-          data = dict(name='VPN integration diagnostics', head_sha=os.environ['GITHUB_SHA'],
+          data = dict(name='VPN integration diagnostics (${{ matrix.mode }})', head_sha=os.environ['GITHUB_SHA'],
                       status='completed', conclusion='neutral',
                       output=dict(title='Ephemeral runner diagnostics', summary='\n'.join(sections)[-60000:]))
           subprocess.run(['gh','api','--method','POST','repos/' + os.environ['GITHUB_REPOSITORY'] + '/check-runs', '--input','-'], input=json.dumps(data), text=True, check=True, stdout=subprocess.DEVNULL)
