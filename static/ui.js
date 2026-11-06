@@ -251,3 +251,37 @@ function setupDatePickers(root = document) {
   });
 }
 setupDatePickers();
+
+// Never resubmit the destructive POST. Poll the durable root-worker state across
+// temporary web/broker restarts, then load the newly restored dashboard.
+const restoreProgress = document.querySelector('[data-restore-progress]');
+if (restoreProgress) {
+  const fa = document.documentElement.lang === 'fa';
+  const message = restoreProgress.querySelector('[data-restore-message]');
+  const deadline = Date.now()+12*60*1000;
+  async function pollRestore() {
+    if (Date.now()>deadline) {
+      message.textContent=fa?'زمان انتظار تمام شد؛ نتیجه نامشخص است. وضعیت بازیابی را بررسی کنید؛ درخواست را تکرار نکنید.':'Wait timed out; outcome unknown. Check restore status; do not resubmit.';
+      return;
+    }
+    try {
+      const response=await fetch(restoreProgress.dataset.statusUrl,{credentials:'same-origin',cache:'no-store',headers:{Accept:'application/json'}});
+      if (!response.redirected && response.ok && response.headers.get('Content-Type')?.includes('application/json')) {
+        const state=await response.json();
+        if (state.job_id===restoreProgress.dataset.job) {
+          if (state.status==='completed') {window.location.replace(restoreProgress.dataset.dashboardUrl);return;}
+          if (state.status==='failed') {
+            message.textContent=fa?'بازیابی ناموفق بود. برای بررسی فایل‌ها و سلامت سرویس‌ها از SSH و لاگ‌ها کمک بگیرید؛ نسخهٔ ایمنی پیش از بازیابی روی سرور حفظ شده است.':'Restore failed. Check service health and logs using SSH; any pre-restore safety snapshot is retained on the server.';
+            return;
+          }
+          message.textContent=fa?'بازیابی در حال انجام است؛ صفحه را باز نگه دارید.':'Restoring; keep this page open.';
+        }
+      }
+    } catch (_) { /* A short outage is expected; never infer success from it. */ }
+    setTimeout(pollRestore,2000);
+  }
+  setTimeout(pollRestore,2000);
+}
+document.querySelectorAll('[data-restore-form]').forEach(form=>form.addEventListener('submit',()=>{
+  form.querySelector('button').disabled=true;
+}));

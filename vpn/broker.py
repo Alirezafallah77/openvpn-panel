@@ -25,7 +25,11 @@ class Handler(socketserver.StreamRequestHandler):
             message = json.loads(line)
             if type(message) is not dict:
                 raise ValueError('invalid request')
-            if 'operation' in message:
+            if message.get('operation') == 'backup-restore-upload':
+                from vpn.web_restore import queue_upload
+                self.request.settimeout(120)
+                result = dict(ok=True,result=queue_upload(message,self.rfile))
+            elif 'operation' in message:
                 result = dict(ok=True, result=dispatch(message))
             else:
                 if set(message) != {'name', 'action'} or not all(type(v) is str for v in message.values()):

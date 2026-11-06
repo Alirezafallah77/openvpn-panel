@@ -1,4 +1,6 @@
 """Bounded, authenticated migration backups; never extract untrusted tar paths."""
+from contextlib import contextmanager
+import gzip
 import hashlib
 import io
 import json
@@ -117,11 +119,28 @@ def capture(root=ROOT, database=DATABASE):
     return data
 
 
+@contextmanager
+def bounded_archive(data):
+    # Bound decompression BEFORE tarfile parses PAX/GNU metadata as well as file
+    # contents. A small gzip upload must not allocate unlimited header memory.
+    with tempfile.TemporaryFile() as expanded:
+        with gzip.GzipFile(fileobj=io.BytesIO(data)) as source:
+            size = 0
+            while chunk := source.read(65536):
+                size += len(chunk)
+                if size > MAX_EXPANDED + 16*1024**2:
+                    raise ValueError('Expanded archive too large')
+                expanded.write(chunk)
+        expanded.seek(0)
+        with tarfile.open(fileobj=expanded,mode='r:') as archive:
+            yield archive
+
+
 def validate_archive(data, stage):
     if len(data) > MAX_ARCHIVE:
         raise ValueError('Archive too large')
     total, seen = 0, set()
-    with tarfile.open(fileobj=io.BytesIO(data), mode='r:gz') as archive:
+    with bounded_archive(data) as archive:
         count = 0
         for member in archive:
             count += 1

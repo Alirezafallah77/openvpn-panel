@@ -54,6 +54,56 @@ default_crl_days=365
         self.q.account('old-server', 100, 200)
         self.archive = backups.capture(self.root, self.db)
 
+    def test_web_upload_queue_validates_private_job_and_worker_cleanup(self):
+        from vpn import web_restore as w
+        from unittest.mock import patch
+        with patch.object(w,'ROOT',self.root), patch.object(w.subprocess,'run') as run:
+            state=w.queue_upload(dict(operation='backup-restore-upload',size=len(self.archive),passphrase=''),io.BytesIO(self.archive))
+            job=self.root/'restore-jobs'/state['job_id']
+            self.assertEqual((job/'archive').read_bytes(),self.archive)
+            self.assertEqual((job/'archive').stat().st_mode & 0o777,0o600)
+            self.assertEqual(job.stat().st_mode & 0o777,0o700)
+            self.assertEqual(run.call_args.args[0][-3:],['/usr/local/sbin/openvpn-panelctl','apply-restore',state['job_id']])
+            with self.assertRaises(ValueError):
+                w.queue_upload(dict(operation='backup-restore-upload',size=len(self.archive),passphrase=''),io.BytesIO(self.archive))
+            restore=Mock()
+            w.apply_job(state['job_id'],restore)
+            restore.assert_called_once_with(str(job/'archive'),yes=True)
+            self.assertEqual(w.status()['status'],'completed')
+            self.assertFalse(job.exists())
+
+    def test_web_upload_legacy_password_failure_and_invalid_files(self):
+        from vpn import web_restore as w
+        from unittest.mock import patch
+        data=backups.encrypt(self.archive,'old-password-for-backup')
+        with patch.object(w,'ROOT',self.root), patch.object(w.subprocess,'run') as run:
+            for payload,phrase in ((data,''),(b'not a backup','')):
+                with self.assertRaises(Exception):
+                    w.queue_upload(dict(operation='backup-restore-upload',size=len(payload),passphrase=phrase),io.BytesIO(payload))
+            run.assert_not_called()
+            state=w.queue_upload(dict(operation='backup-restore-upload',size=len(data),passphrase='old-password-for-backup'),io.BytesIO(data))
+            job=self.root/'restore-jobs'/state['job_id']
+            self.assertEqual((job/'archive').read_bytes(),self.archive)
+            with self.assertRaises(RuntimeError): w.apply_job(state['job_id'],Mock(side_effect=RuntimeError('failed')))
+            self.assertEqual(w.status()['status'],'failed')
+            self.assertFalse(job.exists())
+
+    def test_web_upload_rejects_truncation_bad_fields_and_queue_failure(self):
+        from vpn import web_restore as w
+        from unittest.mock import patch
+        message=dict(operation='backup-restore-upload',size=len(self.archive),passphrase='')
+        original_run = subprocess.run
+        def run(args,**kwargs):
+            if args[0]=='/usr/bin/systemd-run': raise OSError('queue failed')
+            return original_run(args,**kwargs)
+        with patch.object(w,'ROOT',self.root), patch.object(w.subprocess,'run',side_effect=run):
+            for change in ({'size':True},{'size':backups.MAX_ARCHIVE+1},{'path':'/etc/passwd'}):
+                with self.assertRaises(ValueError): w.queue_upload(message|change,io.BytesIO(self.archive))
+            with self.assertRaises(ValueError): w.queue_upload(message,io.BytesIO(b'x'))
+            with self.assertRaises(OSError): w.queue_upload(message,io.BytesIO(self.archive))
+            self.assertEqual(w.status()['status'],'failed')
+            self.assertEqual(list((self.root/'restore-jobs').iterdir()),[])
+
     def tearDown(self):
         self.temp.cleanup()
 

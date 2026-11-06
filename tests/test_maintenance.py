@@ -35,7 +35,7 @@ class MaintenanceTests(unittest.TestCase):
 
     def test_invalid_parameters_rejected(self):
         for changes in (dict(interval=0), dict(interval=True), dict(token='token\nheader'),
-                        dict(passphrase='short'), dict(chat_id='../../evil')):
+                        dict(chat_id='../../evil')):
             with self.assertRaises(ValueError): m.save_settings(dict(self.message, **changes))
         with self.assertRaises(ValueError): m.dispatch(dict(operation='web-control', action='reboot'))
         with self.assertRaises(ValueError): m.dispatch(dict(operation='shell', command='id'))
@@ -46,7 +46,7 @@ class MaintenanceTests(unittest.TestCase):
             result = m.run_backup()
             send.assert_called_once()
             self.assertEqual(len(m.files()), 1)
-            self.assertTrue((self.directory/m.files()[0]['name']).read_bytes().startswith(m.backups.MAGIC))
+            self.assertTrue((self.directory/m.files()[0]['name']).read_bytes() == b'test archive')
             self.assertIsNone(m.run_backup())
             with patch.object(m, 'send_telegram', side_effect=OSError('bot-secret-must-not-leak')):
                 result = m.run_backup(manual=True)
@@ -72,12 +72,12 @@ class MaintenanceTests(unittest.TestCase):
             self.assertEqual(arguments[-2:], ['/usr/local/sbin/openvpn-panelctl','web-stop'])
         with self.assertRaises(ValueError): m.control_web('restart; id')
 
-    def test_telegram_transport_only_accepts_encrypted_documents(self):
+    def test_telegram_transport_accepts_bounded_plain_and_legacy_archives(self):
         path = self.directory/'backup-20261031T000000Z-abcdef12.ovpnbak'
         path.write_bytes(b'plain private archive')
         with self.assertRaises(ValueError):
             m.send_telegram(self.message['token'],self.message['chat_id'],path)
-        path.write_bytes(m.backups.encrypt(b'test archive', self.message['passphrase']))
+        path.write_bytes(b'\x1f\x8btest archive')
         from unittest.mock import MagicMock
         response = MagicMock()
         response.read.return_value = b'{"ok":true}'
@@ -87,7 +87,7 @@ class MaintenanceTests(unittest.TestCase):
             m.send_telegram(self.message['token'],self.message['chat_id'],path)
         request = opener.open.call_args.args[0]
         self.assertTrue(request.full_url.startswith('https://api.telegram.org/bot'))
-        self.assertIn(m.backups.MAGIC, request.data)
+        self.assertIn(b'\x1f\x8btest archive', request.data)
         self.assertIn(b'multipart/form-data', request.headers['Content-type'].encode())
         response.read.return_value = b'{"ok":false}'
         with patch.object(m.urllib.request, 'build_opener', return_value=opener), self.assertRaises(ValueError):

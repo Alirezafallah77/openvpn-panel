@@ -125,3 +125,16 @@ Verified on functional commit `f51e1f3`:
 - Added regression coverage for SSL Management's pending URL retaining the current
   custom port/path; upgraded catalogs have explicit world-readable code-file
   permissions so the unprivileged web worker can read them.
+
+### Web upload restore / password-free backup
+
+New coverage includes authenticated, CSRF/password/confirmation-protected multipart
+uploads over the normal 32 KiB form limit, missing/empty files, private streamed
+broker jobs, truncated/oversized/extra-field rejection, legacy decryption, archive
+validation before queueing, overlap rejection, fixed systemd worker arguments,
+cleanup on success/failure, and masked failure responses. Polling tests cover
+service downtime, mismatched job IDs, failure and success-only dashboard refresh.
+The real Ubuntu migration test now downloads a password-free backup, uploads it
+through the panel, waits through web/broker restart for its durable completion,
+and checks restored data, endpoint/settings preservation, temporary-job cleanup,
+safety snapshot and reconnection with the restored VPN certificate.

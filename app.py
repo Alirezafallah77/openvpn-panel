@@ -14,7 +14,7 @@ from threading import Lock
 from flask import Flask, jsonify, Response, send_file, abort, redirect, render_template as flask_render_template, request, session
 from werkzeug.security import check_password_hash
 from quota import Quotas, TokenStorageError
-from vpn.client import request_profile, maintenance_request
+from vpn.client import request_profile, maintenance_request, upload_restore
 from vpn.maintenance import FILENAME
 from metrics import host_metrics, online_users, summaries
 from panel_web import AdminMount, admin_path, public_port, url_for
@@ -95,6 +95,9 @@ def create_app(config=None):
 
     @app.before_request
     def csrf_check():
+        if request.endpoint == 'backup_restore':
+            from vpn.backups import MAX_ARCHIVE
+            request.max_content_length = MAX_ARCHIVE + 131072
         if request.method == 'POST':
             supplied = request.form.get('csrf', '')
             expected = session.get('csrf')
@@ -434,16 +437,12 @@ def create_app(config=None):
             abort(400)
         token = request.form.get('token', '').strip()
         chat_id = request.form.get('chat_id', '').strip()
-        phrase = request.form.get('passphrase', '')
-        if phrase and phrase != request.form.get('passphrase_repeat', ''):
-            abort(400, description='تکرار رمز بکاپ یکسان نیست.')
         if ((token and not re.fullmatch(r'[0-9]{5,20}:[A-Za-z0-9_-]{20,100}', token)) or
-                (chat_id and not re.fullmatch(r'-?[0-9]{1,20}|@[A-Za-z0-9_]{5,64}', chat_id)) or
-                (phrase and not 16 <= len(phrase) <= 1024)):
-            abort(400, description='توکن، Chat ID یا طول رمز بکاپ معتبر نیست.')
+                (chat_id and not re.fullmatch(r'-?[0-9]{1,20}|@[A-Za-z0-9_]{5,64}', chat_id))):
+            abort(400)
         privileged(dict(operation='backup-settings-save', interval=interval,
             enabled=request.form.get('enabled') == '1', token=request.form.get('token', '').strip(),
-            chat_id=request.form.get('chat_id', '').strip(), passphrase=request.form.get('passphrase', '')))
+            chat_id=request.form.get('chat_id', '').strip()))
         app.logger.info('Admin changed encrypted backup settings')
         return redirect(url_for('backup_page'))
 
@@ -452,6 +451,30 @@ def create_app(config=None):
     def backup_create():
         privileged(dict(operation='backup-create'))
         return redirect(url_for('backup_page'))
+
+    @app.post('/backups/restore')
+    @admin
+    def backup_restore():
+        from vpn.backups import MAX_ARCHIVE
+        confirm_password()
+        if request.form.get('confirm') != '1': abort(400)
+        if not app.config['VPN_CONFIGURED']: abort(503)
+        uploaded=request.files.get('backup')
+        if uploaded is None: abort(400)
+        data=uploaded.stream.read(MAX_ARCHIVE+1)
+        if not 0 < len(data) <= MAX_ARCHIVE: abort(413)
+        phrase=request.form.get('legacy_passphrase','')
+        if len(phrase)>1024: abort(400)
+        try: result=upload_restore(data,phrase)
+        except (OSError,ValueError):
+            text=('فایل نامعتبر است، رمز بکاپ قدیمی صحیح نیست یا بازیابی دیگری در حال اجراست.' if g.language=='fa' else 'Invalid backup, incorrect legacy password, or another restore is running.')
+            return render_template('message.html',error=text),400
+        return render_template('restore_pending.html',job_id=result['job_id'])
+
+    @app.get('/backups/restore/status')
+    @admin
+    def backup_restore_status():
+        return jsonify(privileged(dict(operation='backup-restore-status')))
 
     @app.get('/backups/download/<name>')
     @admin

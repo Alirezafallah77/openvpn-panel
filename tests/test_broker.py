@@ -61,3 +61,15 @@ class BrokerTests(unittest.TestCase):
             result = maintenance_request(dict(operation='backup-settings-get'), self.path)
             self.assertEqual(result, {'enabled':False})
             dispatch.assert_called_once_with(dict(operation='backup-settings-get'))
+
+    def test_bounded_restore_upload_stream_is_uid_authenticated(self):
+        from vpn.client import upload_restore
+        def queue(message, stream):
+            self.assertEqual(message['size'],40000)
+            self.assertEqual(stream.read(40000),b'x'*40000)
+            return {'job_id':'a'*32,'status':'queued'}
+        with patch('vpn.web_restore.queue_upload',side_effect=queue) as enqueue:
+            self.assertEqual(upload_restore(b'x'*40000,path=self.path)['status'],'queued')
+            enqueue.assert_called_once()
+        self.server.allowed_uid=os.getuid()+1
+        with self.assertRaises((OSError,ValueError)): upload_restore(b'x',path=self.path)

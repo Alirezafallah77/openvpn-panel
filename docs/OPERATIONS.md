@@ -202,3 +202,35 @@ only if you want to replace the days field: it converts the chosen UTC calendar
 date to whole validity days while preserving the original first-connect time of
 day. Before first connection only duration is editable, so validity still starts
 on first connection. Date text input remains available without JavaScript.
+
+## Web restore and password-free backups (current behavior)
+
+This section supersedes older encryption/SSH-only backup instructions above.
+New manual and scheduled `.ovpnbak` files are compressed migration archives with
+**no file password**, including Telegram copies. They contain the VPN CA/private
+keys and subscription-link vault key. Anyone with a file can read and reuse its
+contents: store and share it only through trusted private channels. HTTPS protects
+transfer to the panel/Telegram, not the downloaded file at rest. Existing encrypted
+files are unchanged and still require their original password for import.
+
+In **Backups → Upload and restore backup**, choose the file (maximum 45 MiB), enter
+this server's current **administrator password**, and confirm replacement. No new
+backup password is needed. The collapsed legacy-password field is only for old
+AES-encrypted files. The root broker receives bounded bytes, never a web-selected
+filesystem path; it checks archive paths, types, compressed/expanded sizes, SQLite
+integrity, certificates, keys and CRL before scheduling downtime. Decompression is
+bounded before tar metadata is parsed. Passwords never appear in job arguments or
+logs. Only the dedicated panel UID can use this broker operation.
+
+An independent root worker takes the existing private pre-restore snapshot under
+`/var/backups/openvpn-panel`, stops writers, restores users/usage/VPN keys and
+restarts services. Current endpoint/domain/admin path/admin credentials/Telegram
+settings remain unchanged. Existing file/startup-error rollback is retained.
+Uploads are root-only temporary jobs and are removed after completion/failure.
+Keep the acknowledgement page open: it tolerates short outages, polls authenticated
+job status, and refreshes the dashboard **only after confirmed success**. It never
+resubmits a restore automatically. A timeout is an unknown outcome, not success;
+check `/backups/restore/status` under your admin prefix and SSH service journals.
+Power loss or an unrecoverable service restart may still require SSH recovery.
+Active VPN connections are interrupted. When migrating servers, move the original
+DNS record or download profiles for the new endpoint as before.

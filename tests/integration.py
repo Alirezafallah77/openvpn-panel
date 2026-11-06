@@ -233,19 +233,16 @@ def main():
         assert copied_token()==token
         assert copied_token()==token
         print('PASS: repeat copy does not rotate the subscription link',flush=True)
-        migration_password = 'migration-test-passphrase-123'
         post('/backups/settings', dict(password=PASSWORD, interval='15', enabled='0',
-                                      passphrase=migration_password, passphrase_repeat=migration_password, token='', chat_id=''))
+                                      token='', chat_id=''))
         post('/backups/create', {})
         backup_page = opener.open(BASE + '/backups').read().decode()
         backup_name = re.search(r'backup-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}\.ovpnbak', backup_page).group(0)
         encrypted = opener.open(BASE + '/backups/download/' + backup_name).read()
-        from vpn.backups import decrypt, MAGIC
-        assert encrypted.startswith(MAGIC)
-        assert decrypt(encrypted, migration_password)
+        from vpn.backups import MAGIC
+        assert not encrypted.startswith(MAGIC)
+        assert encrypted.startswith(b'\x1f\x8b')
         Path('/root/migration.ovpnbak').write_bytes(encrypted)
-        Path('/root/migration-passphrase').write_text(migration_password)
-        Path('/root/migration-passphrase').chmod(0o600)
         first = q.status('e2e').first_connected
         # Verify downtime controls never stop VPN or its accounting.
         old_pid = subprocess.check_output(['systemctl','show','--property=MainPID','--value','openvpn-panel']).strip()
@@ -266,15 +263,38 @@ def main():
         cmd('systemctl','is-active','--quiet','openvpn-server@panel')
         cmd('systemctl','is-active','--quiet','openvpn-panel-accounting')
         cmd('/usr/local/sbin/openvpn-panelctl','web-start')
-        print('PASS: encrypted web backups and isolated panel stop/restart', flush=True)
+        print('PASS: password-free web backups and isolated panel stop/restart', flush=True)
         client.terminate()
         client.wait(timeout=10)
         # Mutate current data, then restore the backup; new-host endpoint/settings must survive.
         q.create_user('must-disappear',100,1)
         endpoint_before = Path('/etc/openvpn-panel/vpn.json').read_bytes()
         env_before = Path('/etc/openvpn-panel/panel.env').read_bytes()
-        cmd('/usr/local/sbin/openvpn-panelctl','restore','/root/migration.ovpnbak',
-            '--passphrase-file','/root/migration-passphrase','--yes')
+        # Exercise the actual upload boundary and independent root worker, not
+        # a CLI bypass. The web/broker must be free to restart during restore.
+        wait_for(original_login_ready,'web ready for upload restore')
+        page=opener.open(BASE+'/login').read().decode()
+        csrf=re.search(r'name="csrf" value="([^"]+)"',page).group(1)
+        boundary='PanelIntegrationRestoreBoundary'
+        parts=[]
+        for key,value in dict(csrf=csrf,password=PASSWORD,confirm='1').items():
+            parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="{key}"\r\n\r\n{value}\r\n').encode())
+        parts.append((f'--{boundary}\r\nContent-Disposition: form-data; name="backup"; filename="migration.ovpnbak"\r\nContent-Type: application/octet-stream\r\n\r\n').encode()+encrypted+b'\r\n')
+        parts.append(f'--{boundary}--\r\n'.encode())
+        response=opener.open(urllib.request.Request(BASE+'/backups/restore',data=b''.join(parts),headers={'Content-Type':'multipart/form-data; boundary='+boundary})).read().decode()
+        job_id=re.search(r'data-job="([a-f0-9]{32})"',response).group(1)
+        def uploaded_restore_completed():
+            try:
+                state=json.loads(opener.open(BASE+'/backups/restore/status',timeout=2).read())
+            except (OSError,ValueError): return False
+            if state.get('job_id') != job_id: return False
+            if state.get('status')=='failed': raise AssertionError('Web restore failed')
+            return state.get('status')=='completed'
+        wait_for(uploaded_restore_completed,'uploaded password-free backup restores through root worker',timeout=130)
+        assert opener.open(BASE+'/').status==200
+        assert not (Path('/etc/openvpn-panel/restore-jobs')/job_id).exists()
+        assert list(Path('/var/backups/openvpn-panel').glob('pre-restore-*.tar.gz'))
+        print('PASS: web upload restore, durable completion, upload cleanup and private rollback snapshot',flush=True)
         assert [u.name for u in q.list_users()] == ['e2e']
         assert q.status('e2e').first_connected == first
         assert Path('/etc/openvpn-panel/vpn.json').read_bytes() == endpoint_before

@@ -48,27 +48,27 @@ def settings():
 
 def files():
     return [dict(name=p.name, size=p.stat().st_size, created=int(p.stat().st_mtime))
-            for p in sorted(DIRECTORY.glob('backup-*.ovpnbak'), key=lambda p: p.stat().st_mtime_ns, reverse=True)
+            for p in sorted(DIRECTORY.glob('backup-*.ovpnbak'), key=lambda p: (p.stat().st_mtime_ns,p.name), reverse=True)
             if FILENAME.fullmatch(p.name) and p.is_file() and not p.is_symlink()][:20]
 
 
 def public_settings():
     cfg = settings()
     return dict(enabled=cfg['enabled'], interval=cfg['interval'], chat_id=cfg['chat_id'],
-                token_configured=bool(cfg['token']), encryption_configured=bool(cfg['passphrase']),
+                token_configured=bool(cfg['token']), encryption_configured=False,
                 state=read_json(ROOT / 'backup-state.json', {}), files=files())
 
 
 def save_settings(message):
-    if set(message) != {'operation', 'enabled', 'interval', 'token', 'chat_id', 'passphrase'}:
+    if set(message) not in ({'operation','enabled','interval','token','chat_id'}, {'operation','enabled','interval','token','chat_id','passphrase'}):
         raise ValueError('Invalid settings fields')
     if type(message['enabled']) is not bool or type(message['interval']) is not int or not 5 <= message['interval'] <= 10080:
         raise ValueError('Interval must be 5-10080 minutes')
-    if not all(type(message[k]) is str for k in ('token', 'chat_id', 'passphrase')):
+    if not all(type(message[k]) is str for k in ('token', 'chat_id')):
         raise ValueError('Invalid settings types')
     with locked():
         cfg = settings()
-        for field in ('token', 'passphrase'):
+        for field in ('token',):
             if message[field]:
                 cfg[field] = message[field]
         cfg.update(enabled=message['enabled'], interval=message['interval'], chat_id=message['chat_id'].strip())
@@ -76,10 +76,9 @@ def save_settings(message):
             raise ValueError('Invalid Telegram bot token')
         if cfg['chat_id'] and not re.fullmatch(r'-?[0-9]{1,20}|@[A-Za-z0-9_]{5,64}', cfg['chat_id']):
             raise ValueError('Invalid Telegram chat ID')
-        if cfg['passphrase'] and not 16 <= len(cfg['passphrase']) <= 1024:
-            raise ValueError('Backup passphrase must be 16-1024 characters')
-        if cfg['enabled'] and not all(cfg[k] for k in ('token', 'chat_id', 'passphrase')):
-            raise ValueError('Bot token, chat ID and encryption passphrase are required')
+        cfg.pop('passphrase',None)
+        if cfg['enabled'] and not all(cfg[k] for k in ('token', 'chat_id')):
+            raise ValueError('Bot token and chat ID are required')
         atomic_json(ROOT / 'telegram.json', cfg)
     return public_settings()
 
@@ -93,8 +92,8 @@ def send_telegram(token, chat_id, path):
     """HTTPS only, no redirects, no environment proxy, no token/error body in logs."""
     boundary = 'OVPNPanel' + uuid.uuid4().hex
     payload = path.read_bytes()
-    if len(payload) > backups.MAX_ARCHIVE or not payload.startswith(backups.MAGIC):
-        raise ValueError('Only bounded encrypted backups may be sent')
+    if len(payload) > backups.MAX_ARCHIVE or not payload.startswith((b'\x1f\x8b',backups.MAGIC)):
+        raise ValueError('Only bounded backup archives may be sent')
     body = (f'--{boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n{chat_id}\r\n'
             f'--{boundary}\r\nContent-Disposition: form-data; name="document"; filename="{path.name}"\r\n'
             'Content-Type: application/octet-stream\r\n\r\n').encode() + payload + f'\r\n--{boundary}--\r\n'.encode()
@@ -108,25 +107,24 @@ def send_telegram(token, chat_id, path):
 
 
 def create_backup(cfg):
-    if not cfg['passphrase']:
-        raise ValueError('Configure encryption passphrase first')
     # Serialize with certificate issuance/rotation, and every backup/restore.
     with (ROOT / 'pki/lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
-        encrypted = backups.encrypt(backups.capture(), cfg['passphrase'])
+        payload = backups.capture()
     name = 'backup-' + time.strftime('%Y%m%dT%H%M%SZ', time.gmtime()) + '-' + uuid.uuid4().hex[:8] + '.ovpnbak'
     target = DIRECTORY / name
     temp = DIRECTORY / (name + '.new')
     try:
         with temp.open('xb') as out:
             os.chmod(temp, 0o640)
-            out.write(encrypted)
+            out.write(payload)
             out.flush()
             os.fsync(out.fileno())
         temp.replace(target)
     finally:
         temp.unlink(missing_ok=True)
-    for old in sorted(DIRECTORY.glob('backup-*.ovpnbak'), key=lambda p: p.stat().st_mtime_ns, reverse=True)[20:]:
+    previous = [p for p in DIRECTORY.glob('backup-*.ovpnbak') if p != target]
+    for old in sorted(previous, key=lambda p: (p.stat().st_mtime_ns,p.name), reverse=True)[19:]:
         if FILENAME.fullmatch(old.name):
             old.unlink()
     return target
@@ -177,6 +175,9 @@ def dispatch(message):
         if operation in ('ssl-save','vpn-save','panel-save'):
             return network_settings.queue(message)
         raise ValueError('Invalid network settings fields')
+    if operation == 'backup-restore-status' and set(message) == {'operation'}:
+        from vpn.web_restore import status
+        return status()
     if operation == 'backup-settings-get' and set(message) == {'operation'}:
         return public_settings()
     if operation == 'backup-settings-save':

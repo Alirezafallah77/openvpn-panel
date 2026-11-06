@@ -134,6 +134,34 @@ class WebTests(unittest.TestCase):
         response = self.client.get('/?q=%3Cscript%3E')
         self.assertNotIn(b'<script>', response.data)
 
+    def test_restore_upload_requires_auth_csrf_password_confirmation_and_bounds(self):
+        import io
+        self.assertEqual(self.client.get('/backups/restore/status').status_code,302)
+        self.assertEqual(self.client.post('/backups/restore').status_code,400)
+        self.login()
+        self.app.config['VPN_CONFIGURED']=True
+        def send(**changes):
+            data=dict(password='test-password-123',confirm='1',backup=(io.BytesIO(b'x'*40000),'../../bad-name.ovpnbak'))
+            data.update(changes)
+            return self.post('/backups/restore',data)
+        with patch('app.upload_restore',return_value={'job_id':'a'*32}) as upload:
+            self.assertEqual(send(password='wrong').status_code,403)
+            self.assertEqual(send(confirm='0').status_code,400)
+            upload.assert_not_called()
+            response=send()
+            self.assertEqual(response.status_code,200)
+            self.assertIn('data-restore-progress',response.text)
+            upload.assert_called_once_with(b'x'*40000,'')
+            self.assertEqual(send(backup=(io.BytesIO(b''),'empty')).status_code,413)
+        with patch('app.upload_restore',side_effect=ValueError('private detail')):
+            response=send()
+            self.assertEqual(response.status_code,400)
+            self.assertNotIn('private detail',response.text)
+        with patch('app.maintenance_request',return_value={'job_id':'a'*32,'status':'completed'}):
+            response=self.client.get('/backups/restore/status')
+            self.assertEqual(response.json['status'],'completed')
+            self.assertEqual(response.headers['Cache-Control'],'no-store')
+
     def test_backup_settings_masking_download_and_auth(self):
         self.assertEqual(self.client.get('/backups').status_code, 302)
         self.login()

@@ -141,13 +141,16 @@ def main():
         raise SystemExit('Run with sudo.')
     os.umask(0o077)
     parser = argparse.ArgumentParser()
-    parser.add_argument('action', choices=['status', 'restart', 'password', 'backup', 'restore', 'web-start', 'web-stop', 'web-restart', 'apply-settings', 'settings-rollback'])
+    parser.add_argument('action', choices=['status', 'restart', 'password', 'backup', 'restore', 'web-start', 'web-stop', 'web-restart', 'apply-settings', 'settings-rollback', 'apply-restore'])
     parser.add_argument('destination', nargs='?')
     parser.add_argument('--encrypt', action='store_true', help='Encrypt backup with AES-256-GCM')
     parser.add_argument('--passphrase-file', help='Root-owned 0600 file (otherwise prompts)')
     parser.add_argument('--yes', action='store_true', help='Confirm destructive restore')
     args = parser.parse_args()
-    if args.action in ('apply-settings','settings-rollback'):
+    if args.action == 'apply-restore':
+        from vpn.web_restore import apply_job
+        apply_job(args.destination,restore)
+    elif args.action in ('apply-settings','settings-rollback'):
         from vpn import network_settings
         if args.action == 'apply-settings':
             network_settings.apply_pending()
