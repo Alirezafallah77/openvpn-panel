@@ -138,3 +138,17 @@ The real Ubuntu migration test now downloads a password-free backup, uploads it
 through the panel, waits through web/broker restart for its durable completion,
 and checks restored data, endpoint/settings preservation, temporary-job cleanup,
 safety snapshot and reconnection with the restored VPN certificate.
+
+Verified functional commit `823758a`:
+
+- **105 Python tests** and **10 Node tests** pass locally and in Python 3.12/3.13
+  CI [42203296203](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42203296203).
+- Real Ubuntu 24.04 SSH, HTTPS and legacy-upgrade matrix
+  [42203296286](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42203296286):
+  **all passed**. Each runs the actual multipart upload -> UID-authenticated broker
+  -> independent systemd restore worker -> durable authenticated completion flow.
+  Checks include gzip/password-free export, restored data/certificate reconnection,
+  preserved current server configuration, removed upload job and retained private
+  pre-restore snapshot. Existing quota/protocol/migration/fail-closed tests remain
+  green. JavaScript tests separately verify success-only refresh, outage retry,
+  wrong-job handling and failure display (not a claim of full Chromium testing).
