@@ -64,9 +64,11 @@ def profile(name, action='download', root=ROOT):
                     '-in', str(csr), '-out', str(cert))
         ca = (pki / 'ca.crt').read_text()
         tls = (root / 'tls-crypt.key').read_text()
+        exit_notify = 'explicit-exit-notify 1' if chosen == 'udp' else ''
         return f'''client
  dev tun
  proto {transport}
+ {exit_notify}
  remote {conf['endpoint']} {conf['port']}
  resolv-retry infinite
  nobind

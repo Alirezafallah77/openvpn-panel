@@ -254,3 +254,10 @@ Quota/expiry/disable/deletion and certificate revocation continue to apply to al
 sessions. `duplicate-cn` is enabled in fresh installs and inserted during upgrade
 so OpenVPN does not replace the previous same-certificate connection before the
 panel can enforce the selected cap. Upgrade has the normal brief VPN restart.
+
+New UDP profiles include `explicit-exit-notify 1` for prompt graceful-disconnect
+notification. Abrupt network loss, a killed app or older profiles without exit
+notification may retain a slot until the server's keepalive timeout detects loss
+(typically up to about 120 seconds with the current server configuration). Updating
+the user cap itself does not require a new profile; downloading a new UDP profile
+is recommended for faster release on clean disconnects.
