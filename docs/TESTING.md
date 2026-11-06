@@ -152,3 +152,24 @@ Verified functional commit `823758a`:
   pre-restore snapshot. Existing quota/protocol/migration/fail-closed tests remain
   green. JavaScript tests separately verify success-only refresh, outage retry,
   wrong-job handling and failure display (not a claim of full Chromium testing).
+
+### Per-user simultaneous connection limits
+
+Verified functional commit `cea5be9`:
+
+- **110 Python tests** and **10 Node tests** pass. Python 3.12/3.13 workflow
+  [42208269070](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42208269070)
+  passed, including atomic admission under 20 concurrent attempts for two slots,
+  strict range/type validation, shared byte accounting/first-connect activation,
+  cap editing, backup preservation and per-client-ID isolation of rejected peers.
+- Ubuntu 24.04 SSH, HTTPS and legacy-upgrade matrix
+  [42208268786](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42208268786):
+  **all passed**. Real clients reuse one certificate from the same public IP:
+  two are admitted, the third is rejected without dropping either allowed sibling,
+  graceful disconnect frees a slot and a replacement connects. Existing real
+  UDP/TCP, quota/disable/expiry/revocation, web-restore and fail-closed checks remain
+  green. New UDP profiles notify clean exit; TCP profiles omit this UDP-only option.
+- Real testing caught the old name-based management kill disconnecting all clients
+  sharing a common name, including legitimate siblings of a rejected connection.
+  Production status parsing now validates the OpenVPN Client ID and targets the
+  individual instance with `client-kill`, rather than killing by shared CN.
