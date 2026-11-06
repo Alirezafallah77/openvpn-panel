@@ -56,7 +56,8 @@ def public_settings():
     cfg = settings()
     return dict(enabled=cfg['enabled'], interval=cfg['interval'], chat_id=cfg['chat_id'],
                 token_configured=bool(cfg['token']), encryption_configured=False,
-                state=read_json(ROOT / 'backup-state.json', {}), files=files())
+                state=read_json(ROOT / 'backup-state.json', {}), files=files(),
+                restore=read_json(ROOT/'restore-state.json',{}))
 
 
 def save_settings(message):

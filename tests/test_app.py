@@ -157,6 +157,10 @@ class WebTests(unittest.TestCase):
             response=send()
             self.assertEqual(response.status_code,400)
             self.assertNotIn('private detail',response.text)
+        with patch('app.upload_restore',side_effect=OSError('disconnected')):
+            response=send()
+            self.assertEqual(response.status_code,503)
+            self.assertNotIn('disconnected',response.text)
         with patch('app.maintenance_request',return_value={'job_id':'a'*32,'status':'completed'}):
             response=self.client.get('/backups/restore/status')
             self.assertEqual(response.json['status'],'completed')

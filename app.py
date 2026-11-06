@@ -468,7 +468,10 @@ def create_app(config=None):
         phrase=request.form.get('legacy_passphrase','')
         if len(phrase)>1024: abort(400)
         try: result=upload_restore(data,phrase)
-        except (OSError,ValueError):
+        except OSError:
+            text=('ارتباط قطع شد؛ ممکن است بازیابی ثبت شده باشد. ابتدا وضعیت بازیابی را در صفحهٔ بکاپ بررسی کنید و درخواست را تکرار نکنید.' if g.language=='fa' else 'Connection lost; restore may have been queued. Check restore status on the backups page before retrying.')
+            return render_template('message.html',error=text),503
+        except ValueError:
             text=('فایل نامعتبر است، رمز بکاپ قدیمی صحیح نیست یا بازیابی دیگری در حال اجراست.' if g.language=='fa' else 'Invalid backup, incorrect legacy password, or another restore is running.')
             return render_template('message.html',error=text),400
         return render_template('restore_pending.html',job_id=result['job_id'])
