@@ -271,7 +271,7 @@ if (restoreProgress) {
         if (state.job_id===restoreProgress.dataset.job) {
           if (state.status==='completed') {window.location.replace(restoreProgress.dataset.dashboardUrl);return;}
           if (state.status==='failed') {
-            message.textContent=fa?'بازیابی ناموفق بود. برای بررسی فایل‌ها و سلامت سرویس‌ها از SSH و لاگ‌ها کمک بگیرید؛ نسخهٔ ایمنی پیش از بازیابی روی سرور حفظ شده است.':'Restore failed. Check service health and logs using SSH; any pre-restore safety snapshot is retained on the server.';
+            message.textContent=fa?'بازیابی ناموفق بود. برای بررسی فایل‌ها و سلامت سرویس‌ها از SSH و لاگ‌ها کمک بگیرید؛ در صورت ساخته‌شدن نسخهٔ ایمنی، فایل آن روی سرور حفظ شده است.':'Restore failed. Check service health and logs using SSH; any pre-restore safety snapshot is retained on the server.';
             return;
           }
           message.textContent=fa?'بازیابی در حال انجام است؛ صفحه را باز نگه دارید.':'Restoring; keep this page open.';

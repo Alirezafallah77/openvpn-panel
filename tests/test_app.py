@@ -137,7 +137,7 @@ class WebTests(unittest.TestCase):
     def test_restore_upload_requires_auth_csrf_password_confirmation_and_bounds(self):
         import io
         self.assertEqual(self.client.get('/backups/restore/status').status_code,302)
-        self.assertEqual(self.client.post('/backups/restore').status_code,400)
+        self.assertEqual(self.client.post('/backups/restore').status_code,302)
         self.login()
         self.app.config['VPN_CONFIGURED']=True
         def send(**changes):

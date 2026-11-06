@@ -96,6 +96,8 @@ def create_app(config=None):
     @app.before_request
     def csrf_check():
         if request.endpoint == 'backup_restore':
+            # Reject anonymous large uploads before multipart parsing/spooling.
+            if not session.get('admin'): return redirect(url_for('login'))
             from vpn.backups import MAX_ARCHIVE
             request.max_content_length = MAX_ARCHIVE + 131072
         if request.method == 'POST':
