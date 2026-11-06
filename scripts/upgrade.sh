@@ -46,6 +46,11 @@ if [[ $CADDY_NEW == 1 ]]; then
   systemctl unmask --runtime caddy.service
   systemctl disable --now caddy.service
 fi
+# Keep multiple transports for a certificate alive; the transactional connect
+# hook, not OpenVPN's implicit CN replacement, enforces each account's cap.
+if ! grep -Eq '^[[:space:]]*duplicate-cn([[:space:]]|$)' /etc/openvpn/server/panel.conf; then
+  printf '\nduplicate-cn\n' >> /etc/openvpn/server/panel.conf
+fi
 /usr/local/sbin/openvpn-panelctl restart
 systemctl enable --now openvpn-panel-backup.timer
 for service in openvpn-panel openvpn-panel-pki openvpn-panel-accounting openvpn-server@panel; do

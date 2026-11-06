@@ -213,12 +213,14 @@ def create_app(config=None):
         name = request.form.get('name', '')
         gib_text = request.form.get('gib', '50')
         days_text = request.form.get('days', '30')
+        connections_text = request.form.get('max_connections','1')
         error = None
         try:
             gib, days = int(gib_text), int(days_text)
+            connections = int(connections_text)
             if not 1 <= gib <= 100000 or not 1 <= days <= 3650:
                 raise ValueError()
-            token = quotas.create_user(name, gib * 1024**3, days, remember=True)
+            token = quotas.create_user(name, gib * 1024**3, days, remember=True, max_connections=connections)
         except ValueError:
             error = 'نام باید ۱ تا ۶۴ حرف انگلیسی، عدد، خط تیره یا زیرخط باشد؛ حجم و روزها نیز باید در بازهٔ مجاز باشند.'
         except TokenStorageError:
@@ -230,13 +232,13 @@ def create_app(config=None):
             if wants_json:
                 return jsonify(error=error), 400
             return render_template('message.html', error=error, create_another=True,
-                                   form_name=name, form_gib=gib_text, form_days=days_text), 400
+                                   form_name=name, form_gib=gib_text, form_days=days_text, form_connections=connections_text), 400
         app.logger.info('Admin created user=%s', name)
         if wants_json:
             return jsonify(name=name, subscription_url=url_for('subscription', token=token, _external=True),
                            profile_url=url_for('download_profile', name=name) if app.config['VPN_CONFIGURED'] else None)
         return render_template('message.html', token=token, name=name, create_another=True,
-                               form_gib=gib, form_days=days)
+                               form_gib=gib, form_days=days, form_connections=connections)
 
     def return_to_user_list():
         # Only fixed local route + bounded query fields; never accept a redirect URL.
@@ -286,7 +288,8 @@ def create_app(config=None):
                 selected = parse_date(request.form.get('expiry_date',''), request.form.get('date_calendar',g.calendar))
                 first = datetime.fromtimestamp(state.first_connected, timezone.utc).date()
                 days = (selected-first).days
-            quotas.update_limits(name, int(request.form.get('gib', '')) * 1024**3, days)
+            quotas.update_limits(name, int(request.form.get('gib', '')) * 1024**3, days,
+                                 int(request.form['max_connections']) if 'max_connections' in request.form else None)
             app.logger.info('Admin changed allowance user=%s', name)
         except ValueError:
             abort(400)

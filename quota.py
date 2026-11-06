@@ -41,6 +41,7 @@ class Status:
     first_connected: int | None
     expires_at: int | None
     remaining_seconds: int | None
+    max_connections: int = 1
 
 class TokenStorageError(RuntimeError):
     pass
@@ -73,6 +74,8 @@ class Quotas:
             columns = {row[1] for row in db.execute('PRAGMA table_info(users)')}
             if 'encrypted_token' not in columns:
                 db.execute('ALTER TABLE users ADD COLUMN encrypted_token TEXT')
+            if 'max_connections' not in columns:
+                db.execute('ALTER TABLE users ADD COLUMN max_connections INTEGER NOT NULL DEFAULT 1 CHECK(max_connections BETWEEN 1 AND 100)')
             if 'deleted' not in columns:
                 db.execute('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1))')
 
@@ -110,7 +113,7 @@ class Quotas:
         return Status(row['name'], bool(row['enabled']), reason is None, reason,
                       row['limit_bytes'], row['used_bytes'], max(0, row['limit_bytes']-row['used_bytes']),
                       row['days'], row['first_connected'], expiry,
-                      None if expiry is None else max(0, expiry-now))
+                      None if expiry is None else max(0, expiry-now), row['max_connections'])
 
     @staticmethod
     def _row(db, name):
@@ -119,7 +122,9 @@ class Quotas:
             raise KeyError(name)
         return row
 
-    def create_user(self, name: str, limit_bytes: int, days: int, *, remember=False) -> str:
+    def create_user(self, name: str, limit_bytes: int, days: int, *, remember=False, max_connections=1) -> str:
+        if type(max_connections) is not int or not 1 <= max_connections <= 100:
+            raise ValueError('invalid connection limit')
         if not name or len(name) > 64 or not all(c.isascii() and (c.isalnum() or c in '-_') for c in name):
             raise ValueError('name must be 1-64 ASCII letters, digits, underscores or hyphens')
         if type(limit_bytes) is not int or type(days) is not int or limit_bytes <= 0 or days <= 0:
@@ -128,8 +133,8 @@ class Quotas:
         digest = hashlib.sha256(token.encode('ascii')).hexdigest()
         encrypted = self._encrypt_token(token) if remember else None
         with self._db() as db:
-            db.execute('INSERT INTO users(name,token_hash,limit_bytes,days,encrypted_token) VALUES(?,?,?,?,?)',
-                       (name, digest, limit_bytes, days, encrypted))
+            db.execute('INSERT INTO users(name,token_hash,limit_bytes,days,encrypted_token,max_connections) VALUES(?,?,?,?,?,?)',
+                       (name, digest, limit_bytes, days, encrypted, max_connections))
         return token
 
     def status(self, name: str, now=None) -> Status:
@@ -251,15 +256,17 @@ class Quotas:
         with self._db() as db:
             return db.execute('SELECT COALESCE(SUM(used_bytes),0) FROM users').fetchone()[0]
 
-    def update_limits(self, name: str, limit_bytes: int, days: int):
+    def update_limits(self, name: str, limit_bytes: int, days: int, max_connections=None):
         """Change total allowance, preserving usage and first activation."""
         if type(limit_bytes) is not int or not 1 <= limit_bytes <= 100000 * 1024**3:
             raise ValueError('invalid volume')
         if type(days) is not int or not 1 <= days <= 3650:
             raise ValueError('invalid days')
+        if max_connections is not None and (type(max_connections) is not int or not 1 <= max_connections <= 100):
+            raise ValueError('invalid connection limit')
         with self._db() as db:
-            if not db.execute('UPDATE users SET limit_bytes=?, days=? WHERE name=? AND deleted=0',
-                              (limit_bytes, days, name)).rowcount:
+            if not db.execute('UPDATE users SET limit_bytes=?, days=?, max_connections=COALESCE(?,max_connections) WHERE name=? AND deleted=0',
+                              (limit_bytes, days, max_connections, name)).rowcount:
                 raise KeyError(name)
 
     def reset_sessions(self):
@@ -268,7 +275,7 @@ class Quotas:
             db.execute('UPDATE sessions SET closed=1 WHERE closed=0')
 
     def vpn_connect(self, name: str, address: str, now=None):
-        """One active connection per certificate. Transport identity is root supplied."""
+        """Atomically reserve one of the configured simultaneous connection slots."""
         now = self._time(now)
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
@@ -276,8 +283,10 @@ class Quotas:
             state = self._status(row, now)
             if not state.allowed:
                 raise PermissionError(state.reason)
-            if db.execute('SELECT 1 FROM sessions WHERE user_id=? AND closed=0', (row['id'],)).fetchone():
-                raise PermissionError('already_connected')
+            count = db.execute('SELECT count(*) FROM sessions WHERE user_id=? AND closed=0', (row['id'],)).fetchone()[0]
+            sid = name + '|' + address
+            if count >= row['max_connections'] or db.execute('SELECT 1 FROM sessions WHERE id=? AND closed=0',(sid,)).fetchone():
+                raise PermissionError('connection_limit')
             # Reusing a UDP source address after a disconnect must not reuse counters.
             sid = name + '|' + address
             db.execute('DELETE FROM sessions WHERE id=? AND closed=1', (sid,))

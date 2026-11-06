@@ -128,6 +128,40 @@ def main():
     try:
         wait_for(connected, 'real TLS tunnel established')
         wait_for(lambda: q.status('e2e').first_connected is not None, 'first activation persisted')
+        # Same certificate, separate transport connections (even the same IP).
+        # Additional clients do not install routes or disturb the main tunnel.
+        peers=[]
+        def peer(number):
+            log=Path(f'/tmp/e2e-peer-{number}.log')
+            log.unlink(missing_ok=True)
+            process=subprocess.Popen(['ip','netns','exec','ovp-test','openvpn','--config','/tmp/e2e.ovpn',
+                '--log',str(log),'--route-noexec','--ifconfig-noexec','--connect-retry','1','1'])
+            peers.append(process)
+            return process,log
+        def active_count():
+            with q._db() as db:
+                return db.execute("SELECT count(*) FROM sessions s JOIN users u ON s.user_id=u.id WHERE u.name='e2e' AND s.closed=0").fetchone()[0]
+        try:
+            post('/users/e2e/limits',dict(gib=1,days=30,max_connections=2))
+            second,second_log=peer(2)
+            wait_for(lambda: second_log.exists() and 'Initialization Sequence Completed' in second_log.read_text(), 'second same-certificate connection is admitted')
+            wait_for(lambda: active_count()==2,'two simultaneous slots tracked')
+            third,third_log=peer(3)
+            wait_for(lambda: third_log.exists() and 'AUTH_FAILED' in third_log.read_text(),'third same-certificate connection rejected at admission')
+            assert active_count()==2
+            assert client.poll() is None and second.poll() is None
+            second.terminate();second.wait(timeout=10)
+            wait_for(lambda: active_count()==1,'disconnect frees one connection slot')
+            if third.poll() is None: third.terminate();third.wait(timeout=10)
+            replacement,replacement_log=peer(4)
+            wait_for(lambda: replacement_log.exists() and 'Initialization Sequence Completed' in replacement_log.read_text(),'new connection uses freed slot without replacing first client')
+            assert active_count()==2
+            print('PASS: per-user cap 2, third denied, disconnect releases slot, shared certificate and IP supported',flush=True)
+        finally:
+            for process in peers:
+                if process.poll() is None: process.terminate();process.wait(timeout=10)
+        wait_for(lambda: active_count()==1,'extra test connections are closed')
+        post('/users/e2e/limits',dict(gib=1,days=30,max_connections=1))
         def observed_online():
             data = json.loads(Path('/var/lib/openvpn-panel-status/online.json').read_text())
             return 'e2e' in data['users']

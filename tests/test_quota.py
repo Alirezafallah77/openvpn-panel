@@ -12,6 +12,38 @@ class QuotaTests(unittest.TestCase):
 
     def tearDown(self): self.temp.cleanup()
 
+    def test_connection_limit_atomic_admission_release_and_shared_quota(self):
+        self.q.update_limits('alice',10000,30,max_connections=2)
+        def attempt(i):
+            try:
+                self.q.vpn_connect('alice',f'192.0.2.1:{10000+i}',now=100)
+                return i
+            except PermissionError: return None
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            admitted=[i for i in pool.map(attempt,range(20)) if i is not None]
+        self.assertEqual(len(admitted),2)
+        a,b=admitted
+        self.q.vpn_account('alice',f'192.0.2.1:{10000+a}',10,20,final=True,now=101)
+        self.q.vpn_account('alice',f'192.0.2.1:{10000+b}',30,40,now=101)
+        self.q.vpn_connect('alice','192.0.2.2:20000',now=102)
+        self.assertEqual(self.q.status('alice',102).used_bytes,100)
+        self.assertEqual(self.q.status('alice',102).first_connected,100)
+        self.q.update_limits('alice',10000,30,max_connections=1)
+        with self.assertRaises(PermissionError): self.q.vpn_connect('alice','192.0.2.3:30000',now=103)
+        with self.q._db() as db:
+            self.assertEqual(db.execute('SELECT count(*) FROM sessions WHERE closed=0').fetchone()[0],2)
+
+    def test_connection_limit_defaults_validation_and_preserved_edit(self):
+        self.assertEqual(self.q.status('alice').max_connections,1)
+        self.q.create_user('bob',100,2,max_connections=2)
+        self.q.update_limits('bob',200,3)
+        self.assertEqual(self.q.status('bob').max_connections,2)
+        for value in (0,-1,101,True,'2'):
+            with self.assertRaises(ValueError): self.q.create_user('bad',100,2,max_connections=value)
+            with self.assertRaises(ValueError): self.q.update_limits('bob',100,2,max_connections=value)
+        self.q.vpn_connect('bob','192.0.2.1:1')
+        with self.assertRaises(PermissionError): self.q.vpn_connect('bob','192.0.2.1:1')
+
     def test_first_connection_and_expiry(self):
         self.assertIsNone(self.q.status('alice', 50).expires_at)
         self.q.connect('alice', 'session1', 100)

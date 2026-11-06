@@ -117,6 +117,7 @@ tls-crypt {ROOT}/tls-crypt.key
 tls-version-min 1.2
 remote-cert-tls client
 verify-client-cert require
+duplicate-cn
 allow-compression no
 data-ciphers AES-256-GCM:AES-128-GCM:CHACHA20-POLY1305
 auth SHA256

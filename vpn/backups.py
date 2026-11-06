@@ -193,6 +193,9 @@ def validate_archive(data, stage):
                 not re.fullmatch(r'[a-f0-9]{64}', digest) or (first is not None and (type(first) is not int or first < 0))):
                 raise ValueError('Invalid user data')
         columns={row[1] for row in db.execute('PRAGMA table_info(users)')}
+        if 'max_connections' in columns:
+            if db.execute('SELECT 1 FROM users WHERE typeof(max_connections)!="integer" OR max_connections NOT BETWEEN 1 AND 100').fetchone():
+                raise ValueError('Invalid connection limit')
         if 'deleted' in columns:
             if db.execute('SELECT 1 FROM users WHERE deleted NOT IN (0,1) OR deleted IS NULL OR (deleted=1 AND enabled!=0)').fetchone():
                 raise ValueError('Invalid deleted-user state')

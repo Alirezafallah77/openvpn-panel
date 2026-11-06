@@ -153,6 +153,14 @@ default_crl_days=365
         self.assertIn('new.example.com', (root/'vpn.json').read_text())
         self.assertEqual((root/'pki/openssl.cnf').read_text(), '# trusted new server config\n')
 
+    def test_connection_limit_is_carried_by_backup_restore(self):
+        self.q.update_limits('alice',10000,30,max_connections=2)
+        data=backups.capture(self.root,self.db)
+        stage=self.stage(data)
+        root,db=self.target()
+        backups.apply_restore(stage,root,db)
+        self.assertEqual(Quotas(str(db)).status('alice').max_connections,2)
+
     def test_failed_activation_rolls_back(self):
         stage = self.stage()
         root, db = self.target()

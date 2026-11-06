@@ -32,6 +32,20 @@ class WebTests(unittest.TestCase):
     def login(self):
         return self.post('/login', dict(password='test-password-123'))
 
+    def test_per_user_simultaneous_connection_create_edit_and_validation(self):
+        self.login()
+        response=self.post('/users',dict(name='two',gib=50,days=30,max_connections=2))
+        self.assertEqual(response.status_code,200)
+        self.assertEqual(self.q.status('two').max_connections,2)
+        self.assertIn('name="max_connections"',self.client.get('/users/two/edit').text)
+        self.assertEqual(self.post('/users/two/limits',dict(gib=50,days=30,max_connections=3)).status_code,302)
+        self.assertEqual(self.q.status('two').max_connections,3)
+        self.assertEqual(self.post('/users/two/limits',dict(gib=50,days=30)).status_code,302)
+        self.assertEqual(self.q.status('two').max_connections,3)
+        for value in ('0','101','-1','invalid'):
+            self.assertEqual(self.post('/users',dict(name='bad',gib=50,days=30,max_connections=value)).status_code,400)
+            self.assertEqual(self.post('/users/two/limits',dict(gib=50,days=30,max_connections=value)).status_code,400)
+
     def test_auth_csrf_and_logout(self):
         self.assertEqual(self.client.get('/').status_code, 302)
         self.assertEqual(self.client.post('/login').status_code, 400)

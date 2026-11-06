@@ -234,3 +234,23 @@ check `/backups/restore/status` under your admin prefix and SSH service journals
 Power loss or an unrecoverable service restart may still require SSH recovery.
 Active VPN connections are interrupted. When migrating servers, move the original
 DNS record or download profiles for the new endpoint as before.
+
+
+## Per-user simultaneous connection limit
+
+Create/edit a user and set **Simultaneous connections** (1–100; default 1).
+Existing users and legacy backups default to 1, preserving the previous policy.
+For a limit of 2, two active transports using that certificate are admitted and
+its third is rejected synchronously in the client-connect hook. Closing a session
+frees a slot. The count is transactional (`BEGIN IMMEDIATE`) so concurrent
+handshakes cannot overbook. The same public IP may have multiple connections;
+this counts connections, not unique people, IPs or hardware devices. All sessions
+share the account's volume and first-connect validity. The value survives backups.
+
+No new client profile is needed after editing the limit. Lowering a limit does
+not evict already-active sessions: new connections are blocked until the active
+count falls below the new cap. Existing disconnect/reset accounting releases slots.
+Quota/expiry/disable/deletion and certificate revocation continue to apply to all
+sessions. `duplicate-cn` is enabled in fresh installs and inserted during upgrade
+so OpenVPN does not replace the previous same-certificate connection before the
+panel can enforce the selected cap. Upgrade has the normal brief VPN restart.
