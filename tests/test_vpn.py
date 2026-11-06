@@ -38,6 +38,21 @@ class VPNTests(unittest.TestCase):
             with self.assertRaises((ValueError, KeyError)):
                 parse_status(text)
 
+    def test_rejected_duplicate_transport_does_not_kill_allowed_siblings(self):
+        self.q.update_limits('alice',1000,2,max_connections=2)
+        self.q.vpn_connect('alice','192.0.2.10:54321')
+        self.q.vpn_connect('alice','192.0.2.10:54322')
+        management=Mock()
+        management.status.return_value=[('alice','192.0.2.10:54321',10,20,1),
+            ('alice','192.0.2.10:54322',30,40,2),('alice','192.0.2.10:54323',0,0,3)]
+        self.assertEqual(enforce(self.q,management),['alice','alice'])
+        management.kill_client.assert_called_once_with(3)
+        management.kill.assert_not_called()
+        self.assertEqual(self.q.status('alice').used_bytes,100)
+        self.assertEqual(parse_status(STATUS,include_ids=True),[('alice','192.0.2.10:54321',100,200,0)])
+        for cid in (-1,True,'1;kill alice',2**64):
+            with self.assertRaises(ValueError): Management.kill_client(None,cid)
+
     def test_hook_first_connection_and_single_session(self):
         run('connect', self.env, self.q, self.heartbeat)
         self.assertIsNotNone(self.q.status('alice').first_connected)

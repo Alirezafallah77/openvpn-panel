@@ -14,7 +14,7 @@ SNAPSHOT = Path('/var/lib/openvpn-panel-status/online.json')
 NAME = re.compile(r'[A-Za-z0-9_-]{1,64}\Z', re.ASCII)
 
 
-def parse_status(text):
+def parse_status(text, *, include_ids=False):
     """OpenVPN management `status 3`: tab separated, header-name based."""
     lines = text.splitlines()
     if 'END' not in lines:
@@ -35,7 +35,13 @@ def parse_status(text):
             rx, tx = int(row['Bytes Received']), int(row['Bytes Sent'])
             if min(rx, tx) < 0:
                 raise ValueError('invalid counters')
-            clients.append((name, row['Real Address'], rx, tx))
+            entry=(name,row['Real Address'],rx,tx)
+            if include_ids:
+                cid=row['Client ID']
+                if not cid.isascii() or not cid.isdigit() or not 0 <= int(cid) < 2**64:
+                    raise ValueError('invalid client id')
+                entry += (int(cid),)
+            clients.append(entry)
     if header is None:
         raise ValueError('missing status header')
     return clients
@@ -64,13 +70,21 @@ class Management:
                 continue
             lines.append(line)
             if line == 'END':
-                return parse_status('\n'.join(lines))
+                return parse_status('\n'.join(lines),include_ids=True)
         raise ValueError('oversized status')
 
     def kill(self, name):
         if not NAME.fullmatch(name):
             raise ValueError('invalid name')
-        self.sock.sendall(f'kill {name}\n'.encode('ascii'))
+        self._kill_command(f'kill {name}\n')
+
+    def kill_client(self, client_id):
+        if type(client_id) is not int or not 0 <= client_id < 2**64:
+            raise ValueError('invalid client id')
+        self._kill_command(f'client-kill {client_id}\n')
+
+    def _kill_command(self, command):
+        self.sock.sendall(command.encode('ascii'))
         for _ in range(100):
             line = self._readline()
             if line.startswith('SUCCESS:'):
@@ -87,14 +101,20 @@ class Management:
 
 def enforce(quotas, management):
     online = []
-    for name, address, rx, tx in management.status():
+    for entry in management.status():
+        name,address,rx,tx=entry[:4]
+        # With duplicate-cn a name-based kill also disconnects valid siblings.
+        # The root management Client ID isolates the rejected transport.
+        def disconnect():
+            if len(entry)==5: management.kill_client(entry[4])
+            else: management.kill(name)  # Legacy/test adapter; production uses IDs.
         try:
             state = quotas.vpn_account(name, address, rx, tx)
         except KeyError:
-            management.kill(name)  # Unknown certificates/sessions never get free traffic.
+            disconnect()  # Unknown certificates/sessions never get free traffic.
             continue
         if not state.allowed or (REVOCATIONS / ('revoke-' + name)).exists():
-            management.kill(name)
+            disconnect()
         else:
             online.append(name)
     return online

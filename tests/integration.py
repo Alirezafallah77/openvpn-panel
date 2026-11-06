@@ -147,7 +147,7 @@ def main():
             wait_for(lambda: second_log.exists() and 'Initialization Sequence Completed' in second_log.read_text(), 'second same-certificate connection is admitted')
             wait_for(lambda: active_count()==2,'two simultaneous slots tracked')
             third,third_log=peer(3)
-            wait_for(lambda: third_log.exists() and 'AUTH_FAILED' in third_log.read_text(),'third same-certificate connection rejected at admission')
+            wait_for(lambda: third_log.exists() and any(marker in third_log.read_text() for marker in ('AUTH_FAILED','RESTART','Connection reset command was pushed by server','server-pushed-connection-reset')),'third same-certificate connection rejected without disconnecting siblings')
             assert active_count()==2
             assert client.poll() is None and second.poll() is None
             second.terminate();second.wait(timeout=10)
