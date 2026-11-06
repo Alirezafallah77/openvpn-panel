@@ -150,9 +150,11 @@ def main():
             wait_for(lambda: third_log.exists() and any(marker in third_log.read_text() for marker in ('AUTH_FAILED','RESTART','Connection reset command was pushed by server','server-pushed-connection-reset')),'third same-certificate connection rejected without disconnecting siblings')
             assert active_count()==2
             assert client.poll() is None and second.poll() is None
+            # Stop the rejected client's automatic retries before freeing a slot;
+            # otherwise it can legitimately occupy that slot during the assertion.
+            if third.poll() is None: third.terminate();third.wait(timeout=10)
             second.terminate();second.wait(timeout=10)
             wait_for(lambda: active_count()==1,'disconnect frees one connection slot')
-            if third.poll() is None: third.terminate();third.wait(timeout=10)
             replacement,replacement_log=peer(4)
             wait_for(lambda: replacement_log.exists() and 'Initialization Sequence Completed' in replacement_log.read_text(),'new connection uses freed slot without replacing first client')
             assert active_count()==2
