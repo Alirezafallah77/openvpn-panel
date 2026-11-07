@@ -173,3 +173,14 @@ Verified functional commit `cea5be9`:
   sharing a common name, including legitimate siblings of a rejected connection.
   Production status parsing now validates the OpenVPN Client ID and targets the
   individual instance with `client-kill`, rather than killing by shared CN.
+
+### Telegram send controls and safe failure diagnostics
+
+Local suite: **115 Python tests, 10 Node tests passing**. New tests cover explicit
+manual Telegram delivery with scheduling disabled, skipped/local-only outcomes,
+missing settings, local-file retention on delivery failure, strict broker flag
+types, HTTP 400/401/403/404/413/429/500 responses, bounded/malformed API JSON,
+DNS/TLS/network/timeout classification, secret redaction, numeric retry-after,
+authenticated manual-send routing and Persian/English guidance. Transport tests
+mock the Bot API; they do not prove a production VPS can reach Telegram or that
+an operator's bot token, destination, membership or permissions are valid.

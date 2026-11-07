@@ -207,6 +207,23 @@ class WebTests(unittest.TestCase):
         os.symlink(os.path.join(self.temp.name,'test.sqlite'), os.path.join(self.temp.name,name))
         self.assertEqual(self.client.get('/backups/download/'+name).status_code, 404)
 
+    def test_explicit_telegram_send_and_safe_bilingual_diagnostics(self):
+        self.login();self.app.config['VPN_CONFIGURED']=True
+        with patch('app.maintenance_request',return_value={}) as broker:
+            self.assertEqual(self.post('/backups/create',dict(send_now='1')).status_code,302)
+            broker.assert_called_once_with(dict(operation='backup-create',send_now=True))
+        public=dict(enabled=False,interval=15,chat_id='123',token_configured=True,telegram_configured=True,
+            encryption_configured=False,files=[],restore={},state=dict(last_error='telegram_failed',telegram_error='chat_not_found',telegram_status='failed'))
+        with patch('app.maintenance_request',return_value=public):
+            response=self.client.get('/backups')
+            self.assertIn('name="send_now"',response.text)
+            self.assertIn('/start',response.text)
+            self.assertIn('chat_not_found',response.text)
+            self.client.set_cookie('panel-language','en')
+            response=self.client.get('/backups')
+            self.assertIn('Chat not found',response.text)
+            self.assertIn('Send now works independently',response.text)
+
     def test_panel_control_requires_password_confirmation_and_csrf(self):
         self.login()
         self.app.config['VPN_CONFIGURED'] = True

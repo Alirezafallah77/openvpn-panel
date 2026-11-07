@@ -10,8 +10,38 @@
 <label>رمز فعلی مدیر برای تأیید تغییرات<input type="password" name="password" autocomplete="current-password" required></label><button>ذخیرهٔ تنظیمات</button></form>
 <p>{{ 'برای بکاپ دستی نیازی به تنظیم تلگرام یا رمز فایل نیست. برای ارسال خودکار، به ربات پیام /start بدهید و توکن، Chat ID و فاصله را تنظیم کنید. نگهداری محلی: ۲۰ فایل اخیر؛ فایل‌های تلگرام خودکار حذف نمی‌شوند. حداکثر حجم فایل: ۴۵ MiB.' if language=='fa' else 'Manual backups need neither Telegram nor a file password. For automatic delivery, send /start to your bot and configure its token, Chat ID and interval. The latest 20 files are retained locally; Telegram files are not automatically deleted. Maximum file size: 45 MiB.' }}</p></section>
 <section><h2>وضعیت آخرین اجرا</h2><dl><dt>آخرین تلاش (UTC)</dt><dd>{{ settings.state.get('last_attempt')|utc }}</dd><dt>آخرین بکاپ محلی (UTC)</dt><dd>{{ settings.state.get('last_backup')|utc }}</dd><dt>آخرین ارسال موفق تلگرام (UTC)</dt><dd>{{ settings.state.get('last_sent')|utc }}</dd></dl>
-{% if settings.state.get('last_error') %}<aside>{{ 'آخرین بکاپ یا ارسال تلگرام ناموفق بود؛ فضای دیسک، توکن، مجوز ربات و ارتباط شبکه را بررسی کنید.' if language=='fa' else 'The last backup or Telegram delivery failed. Check disk space, bot token, permissions and network access.' }}</aside>{% endif %}
-<form action="{{ url_for('backup_create') }}" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button>بکاپ الآن {% if settings.enabled %}و ارسال به تلگرام{% endif %}</button></form></section>
+{% set telegram_messages = {
+'not_configured': ('توکن ربات و Chat ID را تنظیم و ذخیره کنید.' if language=='fa' else 'Configure and save the bot token and Chat ID.'),
+'invalid_token': ('توکن ربات معتبر نیست؛ توکن ذخیره‌شده را بررسی کنید.' if language=='fa' else 'The bot token is invalid. Check the saved token.'),
+'chat_not_found': ('مقصد پیدا نشد؛ Chat ID را بررسی کنید و در چت خصوصی به همین ربات /start بفرستید. برای گروه یا کانال، ربات باید عضو مقصد باشد.' if language=='fa' else 'Chat not found. Check Chat ID and send /start to this bot in private chat. For groups/channels, add the bot to the destination.'),
+'chat_migrated': ('گروه به سوپرگروه تبدیل شده است؛ Chat ID جدید مقصد را ذخیره کنید.' if language=='fa' else 'The group migrated to a supergroup. Save its new Chat ID.'),
+'bot_blocked': ('ربات توسط گیرنده مسدود شده است؛ آن را آزاد کنید و /start بفرستید.' if language=='fa' else 'The recipient blocked the bot. Unblock it and send /start.'),
+'permission_denied': ('ربات به مقصد دسترسی یا مجوز ارسال سند ندارد؛ عضویت و مجوز آن را بررسی کنید. در کانال، ربات باید مجوز ارسال داشته باشد.' if language=='fa' else 'The bot cannot access the destination or send documents. Check membership and permissions; channels require posting permission.'),
+'rate_limited': ('تلگرام درخواست را محدود کرده است؛ کمی صبر کنید و دوباره ارسال کنید.' if language=='fa' else 'Telegram rate-limited this request. Wait before sending again.'),
+'dns_error': ('نام api.telegram.org روی سرور حل نمی‌شود؛ DNS سرور را بررسی کنید.' if language=='fa' else 'The server cannot resolve api.telegram.org. Check server DNS.'),
+'network_error': ('ارتباط خروجی سرور با تلگرام برقرار نشد؛ شبکه و فایروال خروجی را بررسی کنید.' if language=='fa' else 'The server could not reach Telegram. Check outbound network access and firewall rules.'),
+'timeout': ('ارسال به تلگرام بیش از حد طول کشید؛ شبکه یا سرعت آپلود سرور را بررسی کنید. ممکن است فایل رسیده باشد؛ چت مقصد را پیش از تکرار بررسی کنید.' if language=='fa' else 'Telegram delivery timed out. Check connectivity and upload speed. Delivery may have occurred; check the chat before retrying.'),
+'file_too_large': ('تلگرام فایل را به دلیل حجم زیاد نپذیرفت؛ بکاپ محلی را دانلود کنید.' if language=='fa' else 'Telegram rejected the file size. Download the local backup.'),
+'wire': ('پاسخ قابل تأییدی از تلگرام دریافت نشد؛ تنظیمات و دسترسی شبکه را بررسی کنید.' if language=='fa' else 'No verifiable Telegram response was received. Check settings and network access.'),
+'tls_error': ('اعتبارسنجی TLS تلگرام ناموفق بود؛ ساعت و گواهی‌های ریشهٔ سرور را بررسی کنید. بررسی SSL را غیرفعال نکنید.' if language=='fa' else 'Telegram TLS verification failed. Check server time and CA certificates. Do not disable SSL verification.'),
+'telegram_unavailable': ('تلگرام خطای سرویس داد؛ بعداً دوباره تلاش کنید.' if language=='fa' else 'Telegram returned a service error. Retry later.'),
+'invalid_request': ('تلگرام درخواست را نپذیرفت؛ تنظیمات مقصد و مجوزهای ربات را بررسی کنید.' if language=='fa' else 'Telegram rejected the request. Check destination settings and bot permissions.')
+} %}
+<p>{{ 'وضعیت ارسال آخرین بکاپ' if language=='fa' else 'Latest backup delivery status' }}:
+{% set delivery=settings.state.get('telegram_status') %}
+{% if delivery=='sent' %}<strong>{{ 'ارسال موفق' if language=='fa' else 'Sent successfully' }}</strong>
+{% elif delivery=='skipped' %}{{ 'فقط محلی ذخیره شد؛ ارسال دوره‌ای خاموش بود و ارسال دستی درخواست نشد.' if language=='fa' else 'Saved locally only: scheduled delivery was off and manual delivery was not requested.' }}
+{% elif delivery=='sending' %}{{ 'در حال ارسال؛ برای مشاهدهٔ نتیجه صفحه را تازه کنید.' if language=='fa' else 'Sending; refresh this page for the outcome.' }}
+{% elif delivery=='failed' %}{{ 'ناموفق؛ فایل محلی حفظ شده است.' if language=='fa' else 'Failed; the local file is retained.' }}
+{% else %}{{ 'هنوز تأیید نشده' if language=='fa' else 'Not confirmed yet' }}{% endif %}</p>
+{% if settings.state.get('last_error')=='telegram_failed' %}<aside role="alert">{{ telegram_messages.get(settings.state.get('telegram_error'),telegram_messages['wire']) }}
+<small>{{ 'کد خطا' if language=='fa' else 'Error code' }}: <code>{{ settings.state.get('telegram_error') or 'legacy' }}</code></small>
+{% if settings.state.get('retry_after') %}<p>{{ 'زمان انتظار پیشنهادی (ثانیه)' if language=='fa' else 'Suggested wait (seconds)' }}: {{ settings.state.retry_after }}</p>{% endif %}</aside>
+{% elif settings.state.get('last_error')=='backup_failed' %}<aside role="alert">{{ 'ساخت بکاپ محلی ناموفق بود؛ ارسال تلگرام انجام نشد. فضای دیسک و لاگ سرویس بکاپ را بررسی کنید.' if language=='fa' else 'Local backup creation failed; Telegram delivery was not attempted. Check disk space and backup service logs.' }}</aside>{% endif %}
+<form action="{{ url_for('backup_create') }}" method="post"><input type="hidden" name="csrf" value="{{ csrf }}"><button>بکاپ الآن {% if settings.enabled %}و ارسال به تلگرام{% endif %}</button>
+<button type="submit" name="send_now" value="1" class="secondary" {% if not settings.telegram_configured %}disabled{% endif %}>{{ 'بکاپ و ارسال الآن به تلگرام' if language=='fa' else 'Back up and send to Telegram now' }}</button></form>
+<p class="muted">{{ 'دکمهٔ ارسال الآن مستقل از زمان‌بندی است؛ ابتدا توکن و Chat ID را ذخیره کنید. برای مقصد خصوصی به همین ربات /start بفرستید؛ در گروه و کانال، ربات باید عضو باشد و اجازهٔ ارسال سند داشته باشد. Chat ID شناسهٔ مقصد است، نه توکن و نه نام کاربری ربات.' if language=='fa' else 'Send now works independently of scheduling. Save the token and Chat ID first. Send /start to this bot for a private destination; groups/channels require membership and document-posting permissions. Chat ID identifies the destination, not the bot token or bot username.' }}</p>
+</section>
 <section><h2>دانلود بکاپ‌ها</h2><div class="table"><table><tr><th>نام</th><th>حجم</th><th>دانلود</th></tr>{% for file in settings.files %}<tr><td dir="ltr">{{ file.name }}</td><td>{{ (file.size / 1048576)|round(2) }} MiB</td><td><a href="{{ url_for('backup_download', name=file.name) }}">دانلود</a></td></tr>{% else %}<tr><td colspan="3">هنوز بکاپی ساخته نشده است.</td></tr>{% endfor %}</table></div></section>
 <section id="restore">{% if settings.restore %}<aside>{{ 'وضعیت آخرین بازیابی' if language=='fa' else 'Last restore status' }}:
 {{ ({'queued':'در صف','running':'در حال اجرا','completed':'موفق','failed':'ناموفق'}.get(settings.restore.status,'نامشخص')) if language=='fa' else settings.restore.status }} • {{ settings.restore.updated_at|utc }}

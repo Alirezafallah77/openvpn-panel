@@ -1,5 +1,5 @@
 [Unit]
-Description=Encrypted OpenVPN backup and Telegram delivery
+Description=OpenVPN backup and Telegram delivery
 After=network-online.target
 Wants=network-online.target
 

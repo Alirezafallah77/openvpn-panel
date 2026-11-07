@@ -261,3 +261,37 @@ notification may retain a slot until the server's keepalive timeout detects loss
 (typically up to about 120 seconds with the current server configuration). Updating
 the user cap itself does not require a new profile; downloading a new UDP profile
 is recommended for faster release on clean disconnects.
+
+## Telegram delivery troubleshooting
+
+The automatic-delivery checkbox enables the scheduler and also sends ordinary
+manual backups to Telegram. When it is off, **Back up now** saves a local file only.
+Use the separate **Back up and send to Telegram now** button to explicitly send
+once without enabling scheduling. Save a valid token and destination Chat ID first.
+A private-chat recipient must send `/start` **to this bot**, not to BotFather.
+Chat ID is the recipient/group/channel ID, not the bot's ID, token or username.
+For groups/channels, add the bot and grant document/posting permissions as needed.
+
+The panel now distinguishes local-backup failure from delivery failure and shows
+whether the latest backup was sent, skipped or is still sending. The timestamp of
+an older successful send is not proof that the latest backup was sent. Telegram
+failure preserves the local backup. Only allowlisted diagnostic codes are shown:
+`invalid_token`, `chat_not_found`, `chat_migrated`, `bot_blocked`,
+`permission_denied`, `rate_limited`, `dns_error`, `network_error`, `timeout`,
+`tls_error`, `file_too_large`, `telegram_unavailable` or safe generic failures.
+Raw Bot API descriptions/URLs may contain secrets and are never stored/displayed.
+On rate limiting, an allowlisted numeric retry-after interval may be shown.
+A timeout is ambiguous: check the destination before retrying to avoid duplicates.
+Do not disable TLS verification or post tokens, config files or backups in support.
+
+Scheduled jobs require the systemd timer installed by install/upgrade:
+
+```bash
+sudo systemctl status openvpn-panel-backup.timer --no-pager
+sudo systemctl status openvpn-panel-backup.service --no-pager
+```
+
+The scheduler requires outbound HTTPS/DNS to `api.telegram.org`; a working panel
+SSL certificate says nothing about outbound Telegram connectivity. No real bot
+credentials or production backups are used in CI. Share only the panel's safe
+error code when diagnosing a live server.

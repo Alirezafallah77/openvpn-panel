@@ -454,7 +454,10 @@ def create_app(config=None):
     @app.post('/backups/create')
     @admin
     def backup_create():
-        privileged(dict(operation='backup-create'))
+        if request.form.get('send_now') == '1':
+            privileged(dict(operation='backup-create',send_now=True))
+        else:
+            privileged(dict(operation='backup-create'))
         return redirect(url_for('backup_page'))
 
     @app.post('/backups/restore')
