@@ -184,3 +184,12 @@ DNS/TLS/network/timeout classification, secret redaction, numeric retry-after,
 authenticated manual-send routing and Persian/English guidance. Transport tests
 mock the Bot API; they do not prove a production VPS can reach Telegram or that
 an operator's bot token, destination, membership or permissions are valid.
+
+Verified functional commit `c50e503`: unit workflow
+[42354030518](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42354030518)
+passed (Python 3.12/3.13, 115 Python tests and 10 Node tests). Ubuntu 24.04 SSH,
+HTTPS and upgrade regression workflow
+[42354030499](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42354030499)
+also passed. These verify the code and preserve existing backup/restore/VPN
+behavior; live Telegram delivery still requires checking the operator's server,
+bot credentials and destination and has **not** been claimed as verified by CI.
