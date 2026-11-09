@@ -514,6 +514,7 @@ class WebTests(unittest.TestCase):
         self.assertEqual(self.post('/users',dict(name='legacy',gib=50,days=30)).status_code,200)
 
     def test_reset_and_renew_route_keeps_link_and_first_activation(self):
+        self.login()
         token=self.q.create_user('renewal',100,30)
         self.q.vpn_connect('renewal','peer',now=100)
         self.q.vpn_account('renewal','peer',40,60,now=101)
