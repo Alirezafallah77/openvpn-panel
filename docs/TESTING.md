@@ -218,3 +218,15 @@ expiry/disable/revocation, upload restore, first activation and fail-closed test
 remain included. A production user's exact AUTH_FAILED cause is not established
 without their server's current safe diagnostics; TLS failures can precede the
 admission hook entirely.
+
+Final verification of functional commit `faf324e`: unit workflow
+[42572785011](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42572785011)
+**passed** on Python 3.12/3.13 (121 Python tests, 10 Node tests). Full Ubuntu
+24.04 workflow
+[42572784927](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42572784927)
+**passed** in SSH, HTTPS and upgrade modes, including diagnostic publication.
+The preceding documentation-head rerun
+[42572694990](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42572694990)
+also passed all three modes; the earlier publication-only failure did not recur.
+Renewal uses one days input in both full pages and dynamically fetched dialogs;
+without JavaScript it remains editable alongside the date controls.
