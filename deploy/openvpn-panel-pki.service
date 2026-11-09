@@ -18,7 +18,7 @@ ProtectSystem=strict
 ProtectHome=true
 PrivateTmp=true
 PrivateDevices=true
-ReadWritePaths=/etc/openvpn-panel /run/openvpn-panel-pki /var/lib/openvpn-panel-revocations /var/lib/openvpn-panel-backups
+ReadWritePaths=/var/lib/openvpn-panel /etc/openvpn-panel /run/openvpn-panel-pki /var/lib/openvpn-panel-revocations /var/lib/openvpn-panel-backups
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 
 [Install]

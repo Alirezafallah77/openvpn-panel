@@ -64,9 +64,15 @@ def profile(name, action='download', root=ROOT):
             command('openssl', 'ca', '-batch', '-notext', '-config', config, '-extensions', 'client_cert',
                     '-in', str(csr), '-out', str(cert))
         serial=normalize_serial(command('openssl','x509','-in',str(cert),'-serial','-noout').strip().split('=',1)[1])
-        with sqlite3.connect('file:/var/lib/openvpn-panel/quota.sqlite?mode=rw',uri=True) as db:
-            if not db.execute('UPDATE users SET cert_serial=? WHERE id=? AND name=? AND deleted=0',(serial,identity[0],name)).rowcount:
-                raise ValueError('user changed during certificate issuance')
+        # Root's rollback journal must remain accessible to the panel group,
+        # just like journals created by the accounting hook.
+        mask=os.umask(0o007)
+        try:
+            with sqlite3.connect('file:/var/lib/openvpn-panel/quota.sqlite?mode=rw',uri=True,timeout=30) as db:
+                if not db.execute('UPDATE users SET cert_serial=? WHERE id=? AND name=? AND deleted=0',(serial,identity[0],name)).rowcount:
+                    raise ValueError('user changed during certificate issuance')
+        finally:
+            os.umask(mask)
         ca = (pki / 'ca.crt').read_text()
         tls = (root / 'tls-crypt.key').read_text()
         exit_notify = 'explicit-exit-notify 1' if chosen == 'udp' else ''
