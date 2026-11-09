@@ -282,8 +282,6 @@ def create_app(config=None):
             days = int(request.form.get('days',''))
             reset=request.form.get('reset_plan')=='1'
             renew=reset or request.form.get('renew_now')=='1'
-            if renew and request.form.get('renew_days_fallback'):
-                days=int(request.form['renew_days_fallback'])
             if request.form.get('set_expiry_date') == '1' and not renew:
                 state = quotas.status(name)
                 if state.valid_from is None: raise ValueError('Not activated')
