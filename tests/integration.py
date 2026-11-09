@@ -352,7 +352,7 @@ def main():
             assert archive.getmember('etc/openvpn-panel/pki/ca.key').size > 0
         assert os.stat('/root/panel-ci-backup.tar.gz').st_mode & 0o077 == 0
         print('PASS: consistent private backup created', flush=True)
-        post('/users/e2e/delete',dict(confirm='1',confirm_name='e2e'))
+        post('/users/e2e/delete',dict(confirm='1'))
         wait_for(no_open_session,'deleted connected user is disconnected by accounting')
         assert not q.list_users()
         assert q.status_by_token(token) is None
@@ -362,6 +362,27 @@ def main():
         time.sleep(8)
         assert not connected(),'deleted certificate reconnected'
         print('PASS: deletion hides user, invalidates link and blocks old certificate',flush=True)
+        client.terminate()
+        client.wait(timeout=10)
+        post('/users',dict(name='e2e',gib=50,days=30))
+        assert q.status('e2e').first_connected is None
+        assert q.status_by_token(token) is None
+        client=start_client()  # old certificate, before fresh profile issuance
+        time.sleep(8)
+        assert not connected(),'recreated user revived old certificate'
+        client.terminate()
+        client.wait(timeout=10)
+        recreated=post('/users/e2e/profile',{})
+        client=start_client()  # old certificate after revocation/issuance
+        time.sleep(8)
+        assert not connected(),'old certificate survived recreation rotation'
+        client.terminate()
+        client.wait(timeout=10)
+        Path('/tmp/e2e.ovpn').write_bytes(recreated)
+        client=start_client()
+        wait_for(connected,'recreated username connects using only its new certificate')
+        assert q.status_by_token(token) is None
+        print('PASS: safe username reuse; old certificate denied before/after issuance, new certificate admitted',flush=True)
         cmd('/usr/local/sbin/openvpn-panelctl', 'restart')
         wait_for(lambda: subprocess.run(['systemctl', 'is-active', '--quiet', 'openvpn-server@panel.service']).returncode == 0,
                  'maintenance restart restores VPN')

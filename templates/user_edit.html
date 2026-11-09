@@ -24,6 +24,6 @@
 'credential_rotating': ('قطع اتصال‌های کلید قبلی در حال تکمیل است؛ کمی صبر کنید.' if language=='fa' else 'Old-certificate connections are being disconnected. Retry shortly.'),
 'accounting_unavailable': ('سرویس حسابداری آماده نیست؛ وضعیت سرویس سرور باید بررسی شود.' if language=='fa' else 'Accounting is unavailable; check server services.')
 } %}
-<aside><strong>{{ 'عیب‌یابی اتصال' if language=='fa' else 'Connection diagnostics' }}</strong><p>{{ auth_messages.get(user.last_auth_code,('علت اتصال هنوز ثبت نشده است؛ خطای گواهی یا TLS ممکن است پیش از رسیدن به این مرحله رخ دهد.' if language=='fa' else 'No admission diagnostic recorded. Certificate or TLS failures can occur before this hook.')) }}</p>
+<aside>{% if user.reason %}<p>{{ auth_messages.get(user.reason,user.reason) }}</p>{% endif %}<strong>{{ 'عیب‌یابی اتصال' if language=='fa' else 'Connection diagnostics' }}</strong><p>{{ auth_messages.get(user.last_auth_code,('علت اتصال هنوز ثبت نشده است؛ خطای گواهی یا TLS ممکن است پیش از رسیدن به این مرحله رخ دهد.' if language=='fa' else 'No admission diagnostic recorded. Certificate or TLS failures can occur before this hook.')) }}</p>
 {% if user.last_auth_at %}<p><code>{{ user.last_auth_code }}</code> • {{ user.last_auth_at|utc }}</p>{% endif %}</aside>
 </section>{% endblock %}
