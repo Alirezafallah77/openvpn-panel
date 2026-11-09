@@ -26,12 +26,21 @@ def run(action, env, quotas, heartbeat=HEARTBEAT):
     name = env['common_name']
     peer = address(env)
     if action == 'connect':
-        if (REVOCATIONS / ('revoke-' + name)).exists():
-            raise PermissionError('credential rotation pending')
-        age = time.time() - Path(heartbeat).stat().st_mtime
-        if not 0 <= age <= 15:
-            raise PermissionError('accounting unavailable')
-        quotas.vpn_connect(name, peer)
+        try:
+            if (REVOCATIONS / ('revoke-' + name)).exists():
+                raise PermissionError('credential_rotating')
+            try: age = time.time() - Path(heartbeat).stat().st_mtime
+            except FileNotFoundError:
+                quotas.record_auth(name,'accounting_unavailable')
+                raise
+            if not 0 <= age <= 15:
+                raise PermissionError('accounting_unavailable')
+            quotas.vpn_connect(name, peer, serial=env.get('tls_serial_hex_0'))
+        except PermissionError as error:
+            code=str(error)
+            quotas.record_auth(name,code if code in {'disabled','expired','volume_exhausted','connection_limit','old_certificate','credential_rotating','accounting_unavailable'} else 'internal_error')
+            raise
+        else: quotas.record_auth(name,'accepted')
     elif action == 'disconnect':
         quotas.vpn_account(name, peer, int(env['bytes_received']), int(env['bytes_sent']), final=True)
     else:

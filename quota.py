@@ -10,7 +10,7 @@ import secrets
 import sqlite3
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 SCHEMA = '''
 PRAGMA foreign_keys=ON;
@@ -42,6 +42,9 @@ class Status:
     expires_at: int | None
     remaining_seconds: int | None
     max_connections: int = 1
+    valid_from: int | None = None
+    last_auth_code: str | None = None
+    last_auth_at: int | None = None
 
 class TokenStorageError(RuntimeError):
     pass
@@ -76,6 +79,13 @@ class Quotas:
                 db.execute('ALTER TABLE users ADD COLUMN encrypted_token TEXT')
             if 'max_connections' not in columns:
                 db.execute('ALTER TABLE users ADD COLUMN max_connections INTEGER NOT NULL DEFAULT 1 CHECK(max_connections BETWEEN 1 AND 100)')
+            for field, declaration in {'valid_from':'INTEGER','prior_usage':'INTEGER NOT NULL DEFAULT 0 CHECK(prior_usage>=0)',
+                    'cert_serial':'TEXT','original_name':'TEXT','last_auth_code':'TEXT','last_auth_at':'INTEGER'}.items():
+                if field not in columns: db.execute(f'ALTER TABLE users ADD COLUMN {field} {declaration}')
+            session_columns={row[1] for row in db.execute('PRAGMA table_info(sessions)')}
+            if 'started_at' not in session_columns:
+                db.execute('ALTER TABLE sessions ADD COLUMN started_at INTEGER NOT NULL DEFAULT 0')
+            db.execute('CREATE INDEX IF NOT EXISTS sessions_active_user ON sessions(user_id) WHERE closed=0')
             if 'deleted' not in columns:
                 db.execute('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1))')
 
@@ -101,7 +111,8 @@ class Quotas:
 
     @staticmethod
     def _status(row, now):
-        expiry = None if row['first_connected'] is None else row['first_connected'] + row['days'] * 86400
+        start = row['valid_from'] if row['valid_from'] is not None else row['first_connected']
+        expiry = None if start is None else start + row['days'] * 86400
         if row['deleted'] or not row['enabled']:
             reason = 'disabled'
         elif row['used_bytes'] >= row['limit_bytes']:
@@ -113,7 +124,7 @@ class Quotas:
         return Status(row['name'], bool(row['enabled']), reason is None, reason,
                       row['limit_bytes'], row['used_bytes'], max(0, row['limit_bytes']-row['used_bytes']),
                       row['days'], row['first_connected'], expiry,
-                      None if expiry is None else max(0, expiry-now), row['max_connections'])
+                      None if expiry is None else max(0, expiry-now), row['max_connections'], start, row['last_auth_code'], row['last_auth_at'])
 
     @staticmethod
     def _row(db, name):
@@ -133,8 +144,18 @@ class Quotas:
         digest = hashlib.sha256(token.encode('ascii')).hexdigest()
         encrypted = self._encrypt_token(token) if remember else None
         with self._db() as db:
-            db.execute('INSERT INTO users(name,token_hash,limit_bytes,days,encrypted_token,max_connections) VALUES(?,?,?,?,?,?)',
-                       (name, digest, limit_bytes, days, encrypted, max_connections))
+            db.execute('BEGIN IMMEDIATE')
+            previous=db.execute('SELECT id,deleted FROM users WHERE name=?',(name,)).fetchone()
+            serial=None
+            if previous and previous['deleted']:
+                # Retain history but free the public name. Never authorize the old
+                # certificate while a new generation is awaiting root issuance.
+                serial='pending'
+                archived='deleted_'+str(previous['id'])+'_'+secrets.token_hex(8)
+                db.execute('UPDATE users SET name=?,original_name=? WHERE id=?',(archived,name,previous['id']))
+                db.execute('UPDATE sessions SET closed=1 WHERE user_id=?',(previous['id'],))
+            db.execute('INSERT INTO users(name,token_hash,limit_bytes,days,encrypted_token,max_connections,cert_serial) VALUES(?,?,?,?,?,?,?)',
+                       (name, digest, limit_bytes, days, encrypted, max_connections, serial))
         return token
 
     def status(self, name: str, now=None) -> Status:
@@ -246,7 +267,7 @@ class Quotas:
                 raise TokenStorageError('Subscription link cannot be decrypted') from error
 
     def delete_user(self, name):
-        # Keep a disabled tombstone: reusing a name could reauthorize its old VPN certificate.
+        # Retain a tombstone; safe reuse archives it and requires a fresh certificate.
         with self._db() as db:
             if not db.execute('UPDATE users SET deleted=1,enabled=0,encrypted_token=NULL,token_hash=? WHERE name=? AND deleted=0',
                               (hashlib.sha256(secrets.token_bytes(32)).hexdigest(),name)).rowcount:
@@ -254,9 +275,9 @@ class Quotas:
 
     def total_traffic(self):
         with self._db() as db:
-            return db.execute('SELECT COALESCE(SUM(used_bytes),0) FROM users').fetchone()[0]
+            return db.execute('SELECT COALESCE(SUM(used_bytes+prior_usage),0) FROM users').fetchone()[0]
 
-    def update_limits(self, name: str, limit_bytes: int, days: int, max_connections=None):
+    def update_limits(self, name: str, limit_bytes: int, days: int, max_connections=None, *, reset_usage=False, renew_now=False, enable=False, now=None):
         """Change total allowance, preserving usage and first activation."""
         if type(limit_bytes) is not int or not 1 <= limit_bytes <= 100000 * 1024**3:
             raise ValueError('invalid volume')
@@ -264,9 +285,15 @@ class Quotas:
             raise ValueError('invalid days')
         if max_connections is not None and (type(max_connections) is not int or not 1 <= max_connections <= 100):
             raise ValueError('invalid connection limit')
+        if any(type(value) is not bool for value in (reset_usage,renew_now,enable)): raise ValueError('invalid reset options')
         with self._db() as db:
-            if not db.execute('UPDATE users SET limit_bytes=?, days=?, max_connections=COALESCE(?,max_connections) WHERE name=? AND deleted=0',
-                              (limit_bytes, days, max_connections, name)).rowcount:
+            db.execute('BEGIN IMMEDIATE')
+            if not db.execute('UPDATE users SET limit_bytes=?, days=?, max_connections=COALESCE(?,max_connections), '
+                              'prior_usage=prior_usage+CASE WHEN ? THEN used_bytes ELSE 0 END, '
+                              'used_bytes=CASE WHEN ? THEN 0 ELSE used_bytes END, '
+                              'valid_from=CASE WHEN ? THEN ? ELSE valid_from END, '
+                              'enabled=CASE WHEN ? THEN 1 ELSE enabled END WHERE name=? AND deleted=0',
+                              (limit_bytes, days, max_connections,reset_usage,reset_usage,renew_now,self._time(now),enable,name)).rowcount:
                 raise KeyError(name)
 
     def reset_sessions(self):
@@ -274,7 +301,7 @@ class Quotas:
         with self._db() as db:
             db.execute('UPDATE sessions SET closed=1 WHERE closed=0')
 
-    def vpn_connect(self, name: str, address: str, now=None):
+    def vpn_connect(self, name: str, address: str, now=None, *, serial=None):
         """Atomically reserve one of the configured simultaneous connection slots."""
         now = self._time(now)
         with self._db() as db:
@@ -283,6 +310,9 @@ class Quotas:
             state = self._status(row, now)
             if not state.allowed:
                 raise PermissionError(state.reason)
+            if row['cert_serial'] is not None:
+                if row['cert_serial']=='pending' or serial is None or normalize_serial(serial) != row['cert_serial']:
+                    raise PermissionError('old_certificate')
             count = db.execute('SELECT count(*) FROM sessions WHERE user_id=? AND closed=0', (row['id'],)).fetchone()[0]
             sid = name + '|' + address
             if count >= row['max_connections'] or db.execute('SELECT 1 FROM sessions WHERE id=? AND closed=0',(sid,)).fetchone():
@@ -290,7 +320,7 @@ class Quotas:
             # Reusing a UDP source address after a disconnect must not reuse counters.
             sid = name + '|' + address
             db.execute('DELETE FROM sessions WHERE id=? AND closed=1', (sid,))
-            db.execute('INSERT INTO sessions(id,user_id) VALUES(?,?)', (sid, row['id']))
+            db.execute('INSERT INTO sessions(id,user_id,started_at) VALUES(?,?,?)', (sid, row['id'],now))
             # client-connect runs after certificate authentication, before tunnel admission.
             db.execute('UPDATE users SET first_connected=COALESCE(first_connected, ?) WHERE id=?',
                        (now, row['id']))
@@ -311,4 +341,33 @@ class Quotas:
                 delta = rx - s['rx'] + tx - s['tx']
                 db.execute('UPDATE users SET used_bytes=used_bytes+? WHERE id=?', (delta, row['id']))
                 db.execute('UPDATE sessions SET rx=?,tx=?,closed=? WHERE id=?', (rx, tx, int(final), sid))
-            return self._status(self._row(db, name), self._time(now))
+            state=self._status(self._row(db, name), self._time(now))
+            return replace(state,allowed=False,reason='session_closed') if s['closed'] and not final else state
+
+    def session_registered(self, name, address):
+        with self._db() as db:
+            return db.execute('SELECT 1 FROM sessions s JOIN users u ON s.user_id=u.id WHERE u.name=? AND s.id=? AND s.closed=0',
+                              (name,name+'|'+address)).fetchone() is not None
+
+    def reconcile_sessions(self, live, now=None):
+        """Reap missed disconnect hooks only after a full snapshot and 30s grace."""
+        now=self._time(now)
+        live={name+'|'+address for name,address in live}
+        with self._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            for row in db.execute('SELECT id FROM sessions WHERE closed=0 AND started_at<=?',(now-30,)).fetchall():
+                if row['id'] not in live: db.execute('UPDATE sessions SET closed=1 WHERE id=?',(row['id'],))
+
+    def record_auth(self,name,code,now=None):
+        allowed={'accepted','disabled','expired','volume_exhausted','connection_limit','old_certificate',
+                 'credential_rotating','accounting_unavailable','internal_error'}
+        if code not in allowed: raise ValueError('invalid diagnostic code')
+        with self._db() as db:
+            db.execute('UPDATE users SET last_auth_code=?,last_auth_at=? WHERE name=? AND deleted=0',(code,self._time(now),name))
+
+
+def normalize_serial(value):
+    import re
+    if not isinstance(value,str) or not re.fullmatch(r'[0-9A-Fa-f:]{1,128}',value):
+        raise PermissionError('old_certificate')
+    return value.replace(':','').upper().lstrip('0') or '0'

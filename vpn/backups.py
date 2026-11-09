@@ -193,6 +193,13 @@ def validate_archive(data, stage):
                 not re.fullmatch(r'[a-f0-9]{64}', digest) or (first is not None and (type(first) is not int or first < 0))):
                 raise ValueError('Invalid user data')
         columns={row[1] for row in db.execute('PRAGMA table_info(users)')}
+        for field in ('valid_from','prior_usage','last_auth_at'):
+            if field in columns and db.execute(f'SELECT 1 FROM users WHERE {field} IS NOT NULL AND (typeof({field})!="integer" OR {field}<0)').fetchone():
+                raise ValueError('Invalid renewal metadata')
+        if 'cert_serial' in columns:
+            for serial, in db.execute('SELECT cert_serial FROM users WHERE cert_serial IS NOT NULL'):
+                if serial!='pending' and (not isinstance(serial,str) or not re.fullmatch('[0-9A-F]{1,128}',serial)):
+                    raise ValueError('Invalid certificate identity')
         if 'max_connections' in columns:
             if db.execute('SELECT 1 FROM users WHERE typeof(max_connections)!="integer" OR max_connections NOT BETWEEN 1 AND 100').fetchone():
                 raise ValueError('Invalid connection limit')

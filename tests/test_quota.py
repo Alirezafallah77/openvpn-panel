@@ -100,7 +100,7 @@ class QuotaTests(unittest.TestCase):
         with self.assertRaises(TokenStorageError): self.q.create_user('cannot_replace_key',100,30,remember=True)
         self.assertFalse(link_key_path(self.q.path).exists())
 
-    def test_delete_tombstone_invalidates_links_and_reserves_certificate_name(self):
+    def test_delete_tombstone_invalidates_links_and_allows_safe_reuse(self):
         import sqlite3
         self.q.vpn_connect('alice','192.0.2.1:123',now=100)
         self.q.vpn_account('alice','192.0.2.1:123',2,3,now=101)
@@ -111,8 +111,12 @@ class QuotaTests(unittest.TestCase):
         for action in (lambda:self.q.status('alice'),lambda:self.q.set_enabled('alice',True),lambda:self.q.rotate_token('alice'),lambda:self.q.update_limits('alice',200,30)):
             with self.assertRaises(KeyError): action()
         with self.assertRaises(PermissionError): self.q.vpn_connect('alice','other',now=102)
-        with self.assertRaises(sqlite3.IntegrityError): self.q.create_user('alice',100,30)
         self.assertFalse(self.q.vpn_account('alice','192.0.2.1:123',4,5,final=True,now=102).allowed)
         self.assertEqual(self.q.total_traffic(),9)
+        new_token=self.q.create_user('alice',100,30)
+        self.assertNotEqual(new_token,self.token)
+        self.assertIsNone(self.q.status_by_token(self.token))
+        with self.assertRaisesRegex(PermissionError,'old_certificate'):
+            self.q.vpn_connect('alice','new',serial='1234',now=103)
 
 if __name__ == "__main__": unittest.main()

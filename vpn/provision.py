@@ -8,6 +8,7 @@ import re
 import sqlite3
 import subprocess
 import sys
+from quota import normalize_serial
 
 ROOT = Path('/etc/openvpn-panel')
 REVOCATIONS = Path('/var/lib/openvpn-panel-revocations')
@@ -23,12 +24,12 @@ def profile(name, action='download', root=ROOT):
         raise ValueError('invalid name')
     if action not in ('download', 'rotate'):
         raise ValueError('invalid action')
-    with sqlite3.connect('file:/var/lib/openvpn-panel/quota.sqlite?mode=ro', uri=True) as db:
-        if not db.execute('SELECT 1 FROM users WHERE name=?', (name,)).fetchone():
-            raise ValueError('unknown user')
     pki = root / 'pki'
     with (pki / 'lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)
+        with sqlite3.connect('file:/var/lib/openvpn-panel/quota.sqlite?mode=ro',uri=True) as db:
+            identity=db.execute('SELECT id,cert_serial FROM users WHERE name=? AND deleted=0',(name,)).fetchone()
+            if identity is None: raise ValueError('unknown user')
         conf = json.loads((root / 'vpn.json').read_text())
         chosen = conf.get('protocol','udp')
         if chosen not in ('udp','tcp'):
@@ -39,7 +40,7 @@ def profile(name, action='download', root=ROOT):
         config = str(pki / 'openssl.cnf')
         # A durable intent allows retry after interrupted revocation/CRL updates.
         intent = Path(str(base) + '.rotation-pending')
-        if action == 'rotate' and cert.exists():
+        if (action == 'rotate' or identity[1]=='pending') and cert.exists():
             intent.touch(mode=0o600)
         if intent.exists():
             if cert.exists():
@@ -62,6 +63,10 @@ def profile(name, action='download', root=ROOT):
                     '-nodes', '-keyout', str(key), '-out', str(csr), '-subj', '/CN=' + name)
             command('openssl', 'ca', '-batch', '-notext', '-config', config, '-extensions', 'client_cert',
                     '-in', str(csr), '-out', str(cert))
+        serial=normalize_serial(command('openssl','x509','-in',str(cert),'-serial','-noout').strip().split('=',1)[1])
+        with sqlite3.connect('file:/var/lib/openvpn-panel/quota.sqlite?mode=rw',uri=True) as db:
+            if not db.execute('UPDATE users SET cert_serial=? WHERE id=? AND name=? AND deleted=0',(serial,identity[0],name)).rowcount:
+                raise ValueError('user changed during certificate issuance')
         ca = (pki / 'ca.crt').read_text()
         tls = (root / 'tls-crypt.key').read_text()
         exit_notify = 'explicit-exit-notify 1' if chosen == 'udp' else ''

@@ -188,6 +188,7 @@ if (userDialog && typeof userDialog.showModal==='function') {
       content.replaceChildren(document.importNode(panel,true));
       content.querySelectorAll('[data-action-cancel]').forEach(cancel=>cancel.addEventListener('click',e=>{e.preventDefault();userDialog.close();}));
       setupDatePickers(content);
+      setupRenewForms(content);
       userDialog.showModal();
       content.querySelector('input:not([type=hidden])')?.focus();
     } catch (_) { window.location.assign(link.href); }
@@ -285,3 +286,31 @@ if (restoreProgress) {
 document.querySelectorAll('[data-restore-form]').forEach(form=>form.addEventListener('submit',()=>{
   form.querySelector('button').disabled=true;
 }));
+
+function setupRenewForms(root=document) {
+  root.querySelectorAll('[data-renew-form]').forEach(form=>{
+    if (form.dataset.renewReady) return;
+    form.dataset.renewReady='1';
+    const toggle=form.querySelector('[data-renew-toggle]');
+    const date=form.querySelector('[data-renew-date]');
+    const days=form.querySelector('[data-renew-days]');
+    const sync=()=>{
+      days.hidden=Boolean(date)&&!toggle.checked;
+      if(date) {
+        date.hidden=toggle.checked;
+        date.querySelectorAll('input,select').forEach(input=>input.disabled=toggle.checked);
+      }
+    };
+    toggle.addEventListener('change',sync);
+    form.querySelector('[name=reset_plan]')?.addEventListener('click',event=>{
+      if(!toggle.checked && date) {
+        // First click reveals the period field, letting the admin choose the
+        // new duration before explicitly submitting the reset.
+        event.preventDefault();toggle.checked=true;sync();
+        days.querySelector('input').focus();
+      }
+    });
+    sync();
+  });
+}
+setupRenewForms();

@@ -194,7 +194,11 @@ def main():
         print('PASS: reconnect denied after volume exhaustion', flush=True)
         client.terminate()
         client.wait(timeout=10)
-        q.update_limits('e2e', 1024**3, 30)
+        activation=q.status('e2e').first_connected
+        post('/users/e2e/limits',dict(gib=1,days=30,max_connections=1,reset_plan=1))
+        renewed=q.status('e2e')
+        assert renewed.used_bytes==0 and renewed.first_connected==activation
+        assert abs(renewed.expires_at-(int(time.time())+30*86400))<5
         client = start_client()
         wait_for(connected, 'renewed allowance reconnects')
         post('/users/e2e/toggle', dict(enabled='0'))

@@ -101,7 +101,9 @@ class Management:
 
 def enforce(quotas, management):
     online = []
-    for entry in management.status():
+    snapshot=management.status()
+    quotas.reconcile_sessions([(entry[0],entry[1]) for entry in snapshot])
+    for entry in snapshot:
         name,address,rx,tx=entry[:4]
         # With duplicate-cn a name-based kill also disconnects valid siblings.
         # The root management Client ID isolates the rejected transport.
@@ -151,7 +153,7 @@ def main():
             # admitting the replacement certificate with the same common name.
             pending = list(REVOCATIONS.glob('revoke-*'))
             if pending:
-                live = {row[0] for row in management.status()}
+                live = {row[0] for row in management.status() if quotas.session_registered(row[0],row[1])}
                 for marker in pending:
                     if marker.name[7:] not in live:
                         marker.unlink(missing_ok=True)

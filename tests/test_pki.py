@@ -61,6 +61,27 @@ extendedKeyUsage=clientAuth
         self.patch_revocations = patch('vpn.provision.REVOCATIONS', self.revocations)
         self.patch_revocations.start()
 
+    def test_recreated_name_revokes_old_certificate_and_binds_new_serial(self):
+        q=Quotas(self.db)
+        original=profile('alice',root=self.root)
+        old=self.root/'old.crt'
+        old.write_bytes((self.pki/'client-alice.crt').read_bytes())
+        with q._db() as db: previous=db.execute("SELECT cert_serial FROM users WHERE name='alice'").fetchone()[0]
+        q.vpn_connect('alice','first',serial=previous)
+        q.delete_user('alice')
+        with self.assertRaises(ValueError): profile('alice',root=self.root)
+        q.create_user('alice',100,30)
+        with self.assertRaisesRegex(PermissionError,'old_certificate'): q.vpn_connect('alice','old',serial=previous)
+        replacement=profile('alice',root=self.root)
+        self.assertNotEqual(original,replacement)
+        self.assertNotEqual(self.verify(old),0)
+        self.assertEqual(self.verify(self.pki/'client-alice.crt'),0)
+        with self.assertRaisesRegex(PermissionError,'old_certificate'): q.vpn_connect('alice','old',serial=previous)
+        with q._db() as db: current=db.execute("SELECT cert_serial FROM users WHERE name='alice'").fetchone()[0]
+        q.vpn_connect('alice','new',serial=current)
+        q.update_limits('alice',100,30,reset_usage=True,renew_now=True)
+        self.assertEqual(replacement,profile('alice',root=self.root))
+
     def tearDown(self):
         self.patch_db.stop()
         self.patch_revocations.stop()

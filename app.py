@@ -280,16 +280,21 @@ def create_app(config=None):
     def limits(name):
         try:
             days = int(request.form.get('days',''))
-            if request.form.get('set_expiry_date') == '1':
+            reset=request.form.get('reset_plan')=='1'
+            renew=reset or request.form.get('renew_now')=='1'
+            if renew and request.form.get('renew_days_fallback'):
+                days=int(request.form['renew_days_fallback'])
+            if request.form.get('set_expiry_date') == '1' and not renew:
                 state = quotas.status(name)
-                if state.first_connected is None: raise ValueError('Not activated')
+                if state.valid_from is None: raise ValueError('Not activated')
                 # Whole-day validity preserves first-connect time-of-day and
                 # never changes consumption or activation in the database.
                 selected = parse_date(request.form.get('expiry_date',''), request.form.get('date_calendar',g.calendar))
-                first = datetime.fromtimestamp(state.first_connected, timezone.utc).date()
+                first = datetime.fromtimestamp(state.valid_from, timezone.utc).date()
                 days = (selected-first).days
             quotas.update_limits(name, int(request.form.get('gib', '')) * 1024**3, days,
-                                 int(request.form['max_connections']) if 'max_connections' in request.form else None)
+                                 int(request.form['max_connections']) if 'max_connections' in request.form else None,
+                                 reset_usage=reset,renew_now=renew,enable=reset)
             app.logger.info('Admin changed allowance user=%s', name)
         except ValueError:
             abort(400)
@@ -314,8 +319,8 @@ def create_app(config=None):
         try: state=quotas.status(name)
         except KeyError: abort(404)
         if request.method=='POST':
-            if request.form.get('confirm')!='1' or request.form.get('confirm_name')!=name:
-                abort(400,description='برای حذف، نام کاربر و تأیید را وارد کنید.')
+            if request.form.get('confirm')!='1':
+                abort(400)
             quotas.delete_user(name)
             app.logger.info('Admin deleted user=%s',name)
             return return_to_user_list()
