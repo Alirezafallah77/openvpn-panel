@@ -209,14 +209,14 @@ def main():
         client = start_client()
         wait_for(connected, 'manually enabled user reconnects')
         with q._db() as db:
-            db.execute('UPDATE users SET first_connected=? WHERE name=?', (int(time.time())-31*86400, 'e2e'))
+            db.execute('UPDATE users SET valid_from=? WHERE name=?', (int(time.time())-31*86400, 'e2e'))
         wait_for(lambda: q.status('e2e').reason == 'expired', 'expiry reached')
         wait_for(no_open_session, 'expired active connection terminated by server')
         # Certificate rotation from web must revoke old certificate at TLS level.
         client.terminate()
         client.wait(timeout=10)
         with q._db() as db:
-            db.execute('UPDATE users SET first_connected=? WHERE name=?', (int(time.time()), 'e2e'))
+            db.execute('UPDATE users SET valid_from=? WHERE name=?', (int(time.time()), 'e2e'))
         new_profile = post('/users/e2e/profile', dict(action='rotate'))
         assert new_profile != profile
         client = start_client()  # old on-disk profile
