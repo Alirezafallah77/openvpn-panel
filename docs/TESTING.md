@@ -193,3 +193,28 @@ HTTPS and upgrade regression workflow
 also passed. These verify the code and preserve existing backup/restore/VPN
 behavior; live Telegram delivery still requires checking the operator's server,
 bot credentials and destination and has **not** been claimed as verified by CI.
+
+### Lifecycle, renewal and authentication diagnostics
+
+Local suite: **121 Python tests and 10 Node tests passing**. Coverage includes
+safe deleted-name reuse, old link invalidation, real OpenSSL revocation and
+serial binding, rejection before new issuance, unchanged profile on renewal,
+renewal from now without changing first activation, live-session counter
+baselines and lifetime traffic across reset, admin/CSRF requirements, and stale
+session cleanup with an admission grace period and live-session preservation.
+
+Functional commit `ef590f3`: unit workflow
+[42572197657](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42572197657)
+passed. In Ubuntu 24.04 workflow
+[42572197776](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/42572197776),
+all three **Test real VPN and quota enforcement** steps passed, including SSH,
+HTTPS and legacy upgrade. The HTTPS job failed only in the subsequent
+**Publish sanitized test diagnostics as a check** step; do not describe this
+workflow as fully green. Real tests now renew an exhausted plan through the web
+and reconnect with the unchanged profile; after deletion they recreate the same
+username, reject its old certificate both before and after fresh issuance, and
+admit the replacement certificate. Existing UDP/TCP, simultaneous connection,
+expiry/disable/revocation, upload restore, first activation and fail-closed tests
+remain included. A production user's exact AUTH_FAILED cause is not established
+without their server's current safe diagnostics; TLS failures can precede the
+admission hook entirely.

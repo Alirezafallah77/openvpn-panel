@@ -295,3 +295,20 @@ The scheduler requires outbound HTTPS/DNS to `api.telegram.org`; a working panel
 SSL certificate says nothing about outbound Telegram connectivity. No real bot
 credentials or production backups are used in CI. Share only the panel's safe
 error code when diagnosing a live server.
+
+
+## User Authentication Failed و تمدید امن
+
+این پیام به‌تنهایی نشانهٔ خراب‌شدن فایل نیست. ابتدا صفحهٔ ویرایش همان کاربر را بررسی کنید: مصرف/حجم کل، تاریخ پایان فعلی، فعال بودن، سقف اتصال هم‌زمان و علت/زمان آخرین پذیرش یا رد. نشست واقعی باقی‌مانده در OpenVPN ممکن است تا تشخیص قطع توسط سرور ظرفیت را اشغال کند؛ فایل را برای دور زدن محدودیت به اشتراک نگذارید. پس از ارتقا، نشست گم‌شده از snapshot کامل مدیریت، با مهلت ۳۰ ثانیه برای مسابقهٔ اتصال/status بسته می‌شود؛ نشست واقعاً زنده صرفاً به خاطر گذشت زمان حذف نمی‌شود. قطع اجباری همچنان بر اساس Client ID است تا اتصال‌های مجاز هم‌نام قطع نشوند.
+
+اگر حجم و زمان تمام شده، برای دورهٔ کامل از «ریست مصرف و تمدید از الآن» استفاده کنید؛ تغییر معمولی حجم/روز مصرف را پاک نمی‌کند. تمدید باید با فایل و لینک قبلی کار کند. اگر نام حذف‌شده را دوباره ساخته‌اید یا عمداً کلید را چرخانده‌اید، فقط فایل جدید معتبر است. پیام گواهی قدیمی را با خاموش کردن بررسی گواهی، حذف CRL یا حذف CA رفع نکنید.
+
+اگر نتیجهٔ تازه‌ای ثبت نشده، شکست ممکن است قبل از hook باشد: ساعت سرور/دستگاه، TLS، گواهی منقضی/باطل، فایل قدیمی پس از چرخش کلید، آدرس/پروتکل و CRL باید بررسی شوند. وضعیت سرویس‌ها را روی خود سرور ببینید:
+
+```bash
+sudo systemctl status openvpn-panel-accounting openvpn-panel-pki openvpn-server@panel --no-pager
+sudo journalctl -u openvpn-panel-accounting -u openvpn-panel-pki -u openvpn-server@panel --since '15 minutes ago' --no-pager
+sudo openssl crl -in /etc/openvpn-panel/crl.pem -noout -lastupdate -nextupdate
+```
+
+خروجی journal ممکن است اطلاعات شبکه داشته باشد؛ قبل از ارسال پاک‌سازی کنید. فایل `.ovpn`، بکاپ، توکن و کلید خصوصی را ارسال نکنید. بدون مشاهدهٔ گزارش همان سرور نمی‌توان علت قطعی خطای یک کاربر را اعلام کرد. تست واقعی CI اثبات دسترسی یا سلامت ساعت/شبکهٔ VPS شما نیست.
