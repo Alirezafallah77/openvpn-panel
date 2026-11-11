@@ -88,6 +88,7 @@ class Quotas:
             db.execute('CREATE INDEX IF NOT EXISTS sessions_active_user ON sessions(user_id) WHERE closed=0')
             if 'deleted' not in columns:
                 db.execute('ALTER TABLE users ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1))')
+            db.execute('CREATE INDEX IF NOT EXISTS users_visible_id ON users(id DESC) WHERE deleted=0')
 
     @contextmanager
     def _db(self):
@@ -221,6 +222,46 @@ class Quotas:
         with self._db() as db:
             return [self._status(row, self._time(now)) for row in
                     db.execute('SELECT * FROM users WHERE deleted=0 ORDER BY id DESC')]
+
+    def dashboard_page(self, search='', status='all', page=1, per_page=20, online=None, now=None):
+        """One consistent read snapshot; materialize only the visible page.
+
+        Names are ASCII, so SQLite lower/instr matches the old literal casefold
+        search without treating underscores or percent signs as SQL wildcards.
+        A temporary table avoids SQLite's parameter limit for large online sets.
+        """
+        if per_page not in (20,50,100) or type(page) is not int or page < 1:
+            raise ValueError('invalid pagination')
+        now=self._time(now)
+        expiry='(COALESCE(valid_from,first_connected)+days*86400)'
+        active=f'(enabled=1 AND used_bytes<limit_bytes AND ({expiry} IS NULL OR {expiry}>:now))'
+        filters={
+            'all':'1', 'active':active, 'disabled':'enabled=0',
+            'expired':f'{expiry}<=:now', 'limited':'used_bytes>=limit_bytes',
+            'online':'EXISTS(SELECT 1 FROM dashboard_online o WHERE o.name=users.name)',
+            'near_limit':f'{active} AND (limit_bytes-used_bytes)<=limit_bytes*0.1',
+            'near_expiry':f'{active} AND {expiry}-:now<=259200',
+        }
+        if status not in filters: raise ValueError('invalid status filter')
+        params={'now':now,'search':search[:64].casefold(), 'limit':per_page}
+        where='deleted=0 AND instr(lower(name),:search)>0 AND ('+filters[status]+')'
+        with self._db() as db:
+            db.execute('CREATE TEMP TABLE dashboard_online(name TEXT PRIMARY KEY) WITHOUT ROWID')
+            db.executemany('INSERT OR IGNORE INTO dashboard_online VALUES(?)',((name,) for name in (online or ())))
+            db.execute('BEGIN')
+            total=db.execute('SELECT COUNT(*) FROM users WHERE '+where,params).fetchone()[0]
+            pages=max(1,(total+per_page-1)//per_page)
+            page=min(page,pages)
+            params['offset']=(page-1)*per_page
+            rows=db.execute('SELECT * FROM users WHERE '+where+' ORDER BY id DESC LIMIT :limit OFFSET :offset',params).fetchall()
+            counts=db.execute(f'SELECT COUNT(*) total, COALESCE(SUM(enabled=0),0) disabled, '
+                f'COALESCE(SUM({expiry}<=:now),0) expired, COALESCE(SUM(used_bytes>=limit_bytes),0) exhausted, '
+                'COALESCE(SUM(EXISTS(SELECT 1 FROM dashboard_online o WHERE o.name=users.name)),0) online '
+                'FROM users WHERE deleted=0',params).fetchone()
+            stats=dict(counts)
+            if online is None: stats['online']=None
+            stats['traffic']=db.execute('SELECT COALESCE(SUM(used_bytes+prior_usage),0) FROM users').fetchone()[0]
+            return dict(users=[self._status(row,now) for row in rows],stats=stats,total=total,page=page,pages=pages)
 
     def rotate_token(self, name: str, *, remember=False) -> str:
         token = secrets.token_urlsafe(32)

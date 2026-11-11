@@ -314,3 +314,23 @@ function setupRenewForms(root=document) {
   });
 }
 setupRenewForms();
+
+// Keep explicit search/Enter and no-JS GET navigation; selects save one click.
+const userFilters = document.querySelector('[data-user-filters]');
+if (userFilters) {
+  const search = userFilters.querySelector('[name=q]');
+  userFilters.querySelectorAll('select').forEach(select => {
+    select.addEventListener('change', () => userFilters.requestSubmit());
+  });
+  userFilters.addEventListener('submit', () => userFilters.setAttribute('aria-busy','true'));
+  window.addEventListener('pageshow', () => userFilters.removeAttribute('aria-busy'));
+  document.addEventListener('keydown', event => {
+    if (event.key !== '/' || event.ctrlKey || event.metaKey || event.altKey || event.isComposing) return;
+    const target = event.target;
+    if (target.closest('input,textarea,select,[contenteditable]:not([contenteditable=false]),dialog[open]')) return;
+    if (document.querySelector('dialog[open]')) return;
+    event.preventDefault();
+    search.focus();
+    search.select();
+  });
+}

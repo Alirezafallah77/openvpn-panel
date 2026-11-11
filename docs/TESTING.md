@@ -230,3 +230,35 @@ The preceding documentation-head rerun
 also passed all three modes; the earlier publication-only failure did not recur.
 Renewal uses one days input in both full pages and dynamically fetched dialogs;
 without JavaScript it remains editable alongside the date controls.
+
+### Dashboard query and usability optimization
+
+The dashboard now pages/filter-counts inside SQLite and constructs Status objects
+only for the displayed page, rather than loading every user's full record into
+Python. Global counts and historical traffic stay independent of the filter and
+use the same read snapshot. Partial indexing excludes archived/deleted users from
+visible-list traversal; arbitrary online-set sizes use a temporary indexed table
+rather than an unbounded SQL IN parameter list. Aggregates and substring searches
+still scan matching data: this is not constant-time pagination for huge datasets.
+
+Local coverage: **124 Python and 14 Node tests**. SQL results are compared against
+the old filter semantics across searches, pagination boundaries, expired and
+renewed users, overlapping disabled/expired states, and unknown online data.
+Only the visible page is materialized. Static ETag revalidation returns 304;
+admin pages remain no-store. JS tests cover select auto-submit, history loading
+state reset and slash search respecting text fields, IME and open dialogs.
+Mobile card layout retains explicit table roles and a caption, with 44px shortcut
+targets and visible keyboard focus. No browser visual/screen-reader audit is
+claimed by these tests.
+
+Reproducible synthetic benchmark (temporary database only):
+
+```bash
+.venv/bin/python scripts/benchmark_dashboard.py --users 10000
+```
+
+On this sandbox, 10,000 users, 20 rows/page, median of five runs: old query and
+Python preparation **71.90 ms**, new **14.96 ms**. Separately traced peak Python
+allocations: **4938.7 KiB → 25.5 KiB**. These numbers exclude native SQLite memory,
+HTML rendering, host-metric sampling, network and production VPS conditions;
+they do not promise a whole-page latency or total-RAM reduction of the same size.

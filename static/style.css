@@ -20,3 +20,19 @@ html[data-theme=light] .admin-panel .row-shortcuts .edit-action{color:#2454a0}ht
 #user-action-dialog{width:min(760px,calc(100% - 24px));max-height:90vh;overflow:auto;border:1px solid var(--border);border-radius:18px;background:var(--surface);color:var(--ink);padding:16px}#user-action-dialog::backdrop{background:#070d1cba;backdrop-filter:blur(4px)}#user-action-dialog .action-panel{border:0;margin:0!important;box-shadow:none;padding:18px}#user-action-dialog [data-close-user-dialog]{font-size:23px;padding:2px 13px}
 
 .browser-preferences{display:flex;flex-wrap:wrap;gap:12px;align-items:end;margin:0 0 20px}.browser-preferences select{width:auto;min-width:130px;margin-bottom:5px}.browser-preferences button{margin-bottom:5px}.date-selects{display:flex;flex-wrap:wrap;gap:12px}.date-selects select{width:105px}fieldset{border:1px solid var(--border);border-radius:12px;padding:16px;margin:12px 0}[dir=ltr] table{text-align:left}[dir=ltr] .cards article:after{left:auto;right:12px}[dir=ltr] .guide-content{text-align:left} .date-selects[hidden]{display:none}
+
+/* Clear keyboard focus and compact, readable subscription cards on phones. */
+.visually-hidden{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
+.admin-panel :is(a,button,input,select,summary):focus-visible{outline:3px solid var(--accent);outline-offset:3px}
+.user-name{font-weight:700;overflow-wrap:anywhere}.user-filters[aria-busy=true]{opacity:.65;cursor:progress}
+@media(max-width:700px){
+  .admin-panel .user-table{overflow:visible}
+  .user-table table,.user-table tbody{display:block;width:100%}
+  .user-table thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .admin-panel .user-table tbody tr{display:block;border:1px solid var(--border);border-radius:14px;margin:12px 0;background:var(--surface);padding:10px}
+  .admin-panel .user-table td{display:block;border:0;padding:8px;white-space:normal;overflow-wrap:anywhere}
+  .user-table td[data-label]::before{content:attr(data-label);display:block;font-size:11px;color:var(--soft);margin-bottom:4px}
+  .user-table .traffic-value{text-align:start}.admin-panel .user-table td progress{width:100%}
+  .user-table .row-shortcuts{gap:12px}.admin-panel .user-table .icon-action{width:44px;height:44px}
+  .user-table .row-link-result,.user-table .row-link-result input{max-width:100%;width:100%;box-sizing:border-box}
+}

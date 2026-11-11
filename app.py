@@ -16,7 +16,7 @@ from werkzeug.security import check_password_hash
 from quota import Quotas, TokenStorageError
 from vpn.client import request_profile, maintenance_request, upload_restore
 from vpn.maintenance import FILENAME
-from metrics import host_metrics, online_users, summaries
+from metrics import host_metrics, online_users
 from panel_web import AdminMount, admin_path, public_port, url_for
 from flask import g
 from i18n import LocalizedLoader, translate, format_date, parse_date, date_input
@@ -116,7 +116,10 @@ def create_app(config=None):
                 for key in ('error','message'):
                     if isinstance(data.get(key),str): data[key] = translate(data[key])
                 response.set_data(app.json.dumps(data))
-        response.headers['Cache-Control'] = 'no-store'
+        # Public static files retain validators and may be stored/revalidated;
+        # admin pages, tokens and APIs must never be cached.
+        response.headers['Cache-Control'] = ('public, max-age=0, must-revalidate'
+            if request.endpoint == 'static' else 'no-store')
         response.headers['X-Robots-Tag'] = 'noindex, nofollow, noarchive'
         response.headers['Referrer-Policy'] = 'no-referrer'
         response.headers['X-Content-Type-Options'] = 'nosniff'
@@ -166,7 +169,6 @@ def create_app(config=None):
     @app.get('/')
     @admin
     def dashboard():
-        all_users = quotas.list_users()
         search = request.args.get('q', '').strip()[:64]
         online = online_users(app.config['ONLINE_SNAPSHOT'])
         status_filter = request.args.get('status', 'all')
@@ -180,26 +182,15 @@ def create_app(config=None):
             page = max(1, int(request.args.get('page','1')[:12]))
         except ValueError:
             page = 1
-        checks = {
-            'all': lambda u: True, 'active': lambda u: u.allowed,
-            'disabled': lambda u: not u.enabled,
-            'expired': lambda u: u.remaining_seconds is not None and u.remaining_seconds <= 0,
-            'limited': lambda u: u.remaining_bytes == 0,
-            'online': lambda u: online is not None and u.name in online,
-            'near_limit': lambda u: u.allowed and u.remaining_bytes <= u.limit_bytes * 0.1,
-            'near_expiry': lambda u: u.allowed and u.remaining_seconds is not None and u.remaining_seconds <= 3 * 86400,
-        }
-        filtered = [u for u in all_users if search.casefold() in u.name.casefold() and checks[status_filter](u)]
-        total = len(filtered)
-        pages = max(1, (total + per_page - 1) // per_page)
-        page = min(page, pages)
-        start = (page - 1) * per_page
-        users = filtered[start:start+per_page]
+        result=quotas.dashboard_page(search,status_filter,page,per_page,online)
+        total,page,pages=result['total'],result['page'],result['pages']
+        start=(page-1)*per_page
+        users=result['users']
         return render_template('dashboard.html', users=users, search=search,
                                status_filter=status_filter, per_page=per_page, page=page, pages=pages,
                                filtered_total=total, range_start=start+1 if total else 0,
                                range_end=min(start+per_page,total),
-                               stats={**summaries(all_users, online), 'traffic': quotas.total_traffic()}, metrics=host_metrics(), online=online)
+                               stats=result['stats'], metrics=host_metrics(), online=online)
 
     @app.get('/api/metrics')
     @admin

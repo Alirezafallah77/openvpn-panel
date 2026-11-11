@@ -3,7 +3,7 @@ const source=fs.readFileSync('static/ui.js','utf8').split('const restoreProgress
 function harness(responses) {
  const timers=[],redirects=[],message={};
  const element={dataset:{job:'abc',statusUrl:'/admin/backups/restore/status',dashboardUrl:'/admin/'},querySelector:()=>message};
- const context={Date,document:{documentElement:{lang:'en'},querySelector:()=>element,querySelectorAll:()=>[]},window:{location:{replace:u=>redirects.push(u)}},setTimeout:fn=>timers.push(fn),fetch:async()=>{
+ const context={Date,document:{documentElement:{lang:'en'},querySelector:selector=>selector==='[data-restore-progress]'?element:null,querySelectorAll:()=>[]},window:{location:{replace:u=>redirects.push(u)}},setTimeout:fn=>timers.push(fn),fetch:async()=>{
   const next=responses.shift();if(next instanceof Error)throw next;
   return {ok:true,redirected:false,headers:{get:()=> 'application/json'},json:async()=>next};
  }};
