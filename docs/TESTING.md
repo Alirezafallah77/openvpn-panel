@@ -262,3 +262,11 @@ Python preparation **71.90 ms**, new **14.96 ms**. Separately traced peak Python
 allocations: **4938.7 KiB → 25.5 KiB**. These numbers exclude native SQLite memory,
 HTML rendering, host-metric sampling, network and production VPS conditions;
 they do not promise a whole-page latency or total-RAM reduction of the same size.
+
+Verified final functional commit `5da2334`: unit workflow
+[43071661344](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/43071661344)
+passed on Python 3.12/3.13 (124 Python tests and 14 Node tests). Full Ubuntu 24.04
+SSH, HTTPS and legacy-upgrade workflow
+[43071661028](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/43071661028)
+passed all three modes, including real VPN, quota enforcement, renewal, safe
+username reuse, protocol switching and backup/restore regressions.
