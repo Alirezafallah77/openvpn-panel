@@ -33,6 +33,7 @@ html[data-theme=light] .admin-panel .row-shortcuts .edit-action{color:#2454a0}ht
   .admin-panel .user-table td{display:block;border:0;padding:8px;white-space:normal;overflow-wrap:anywhere}
   .user-table td[data-label]::before{content:attr(data-label);display:block;font-size:11px;color:var(--soft);margin-bottom:4px}
   .user-table .traffic-value{text-align:start}.admin-panel .user-table td progress{width:100%}
+  .user-table .user-actions,.user-table .user-actions[open]{min-width:0}
   .user-table .row-shortcuts{gap:12px}.admin-panel .user-table .icon-action{width:44px;height:44px}
   .user-table .row-link-result,.user-table .row-link-result input{max-width:100%;width:100%;box-sizing:border-box}
 }
