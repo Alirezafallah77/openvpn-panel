@@ -51,6 +51,9 @@ fi
 if ! grep -Eq '^[[:space:]]*duplicate-cn([[:space:]]|$)' /etc/openvpn/server/panel.conf; then
   printf '\nduplicate-cn\n' >> /etc/openvpn/server/panel.conf
 fi
+# Apply conservative transport options to existing installs without regenerating
+# CA, certificates, endpoint, MTU or cipher configuration.
+/opt/openvpn-panel/.venv/bin/python -Es -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from pathlib import Path; from vpn.performance import tune_server; p=Path('/etc/openvpn/server/panel.conf'); p.write_text(tune_server(p.read_text()))"
 /usr/local/sbin/openvpn-panelctl restart
 systemctl enable --now openvpn-panel-backup.timer
 for service in openvpn-panel openvpn-panel-pki openvpn-panel-accounting openvpn-server@panel; do

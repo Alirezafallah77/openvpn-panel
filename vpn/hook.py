@@ -40,7 +40,6 @@ def run(action, env, quotas, heartbeat=HEARTBEAT):
             code=str(error)
             quotas.record_auth(name,code if code in {'disabled','expired','volume_exhausted','connection_limit','old_certificate','credential_rotating','accounting_unavailable'} else 'internal_error')
             raise
-        else: quotas.record_auth(name,'accepted')
     elif action == 'disconnect':
         quotas.vpn_account(name, peer, int(env['bytes_received']), int(env['bytes_sent']), final=True)
     else:
@@ -50,7 +49,7 @@ def run(action, env, quotas, heartbeat=HEARTBEAT):
 if __name__ == '__main__':
     os.umask(0o007)  # Root hook journals must remain readable/writable to panel group.
     try:
-        run(sys.argv[1], os.environ, Quotas(DATABASE))
+        run(sys.argv[1], os.environ, Quotas(DATABASE, initialize=False))
     except Exception:
         # Do not expose env, IP, credentials or certs in logs.
         print('OpenVPN panel hook failed; connection admission denied if connecting', file=sys.stderr)

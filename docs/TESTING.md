@@ -270,3 +270,30 @@ SSH, HTTPS and legacy-upgrade workflow
 [43071661028](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/43071661028)
 passed all three modes, including real VPN, quota enforcement, renewal, safe
 username reuse, protocol switching and backup/restore regressions.
+
+### VPN transport and hot-path optimization
+
+Local suite: **129 Python tests and 14 Node tests passing**. Runtime hooks open an
+existing database without schema migration or eager Fernet imports; missing DBs
+are never created on this path. Service startup still migrates schema before
+OpenVPN starts. Successful admission stores its safe diagnostic in the same
+transaction as slot reservation. Accounting batches a complete management
+snapshot into one durable transaction, preserves cumulative counter baselines,
+rejects unregistered/closed transports and evaluates shared quota after all
+siblings are charged. Tests cover single-commit accounting, invalid snapshots,
+rollback on unexpected errors, late disconnect/reset, and unchanged admission
+checks. Existing per-Client-ID enforcement remains mandatory.
+
+Linux server transport tuning uses UDP fast-io or TCP tcp-nodelay, in an
+idempotent marked block, on fresh install, upgrade and protocol switch. No
+compression, MTU guesses, cipher downgrade, TLS bypass or DCO activation is
+introduced. Real integration tests assert protocol-specific options while
+connecting and forwarding HTTPS traffic over both UDP and TCP.
+
+Synthetic sandbox benchmark, median of seven runs, 100 admitted transports:
+sequential durable accounting **135.49 ms**, batched **3.55 ms**. Cold quota path
+with eager crypto import and schema setup **50.21 ms**, runtime existing-DB path
+**34.00 ms**. Run `scripts/benchmark_vpn_accounting.py` using the project venv to
+reproduce with a disposable database. These are control-path measurements, not
+internet throughput, TLS handshake timing, full hook timing or a production VPS
+speed guarantee. SQLite fsync/storage and host scheduling strongly affect them.

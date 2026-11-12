@@ -7,6 +7,9 @@ import secrets
 import subprocess
 import sys
 
+sys.path.insert(0, '/opt/openvpn-panel')
+from vpn.performance import tune_server
+
 ROOT = Path('/etc/openvpn-panel')
 APP = Path('/opt/openvpn-panel')
 
@@ -100,7 +103,7 @@ authorityKeyIdentifier = keyid,issuer
     cmd('openssl', 'ca', '-batch', '-config', str(pki / 'openssl.cnf'), '-gencrl', '-out', str(ROOT / 'crl.pem'))
     cmd('openvpn', '--genkey', 'secret', str(ROOT / 'tls-crypt.key'))
     write(ROOT / 'vpn.json', json.dumps(dict(endpoint=endpoint, port=1194, protocol='udp')))
-    write('/etc/openvpn/server/panel.conf', f'''port 1194
+    write('/etc/openvpn/server/panel.conf', tune_server(f'''port 1194
 proto udp4
 dev tun-panel
 dev-type tun
@@ -135,7 +138,7 @@ push "dhcp-option DNS 1.1.1.1"
 push "dhcp-option DNS 9.9.9.9"
 push "block-ipv6"
 verb 3
-''')
+'''))
     write('/usr/local/sbin/openvpn-panel-hook', '#!/bin/sh\nexec /opt/openvpn-panel/.venv/bin/python -Es /opt/openvpn-panel/hook_entry.py "$@"\n', 0o755)
     # Independent chains; no flush of host firewall and no INPUT/SSH policy changes.
     write('/usr/local/sbin/openvpn-panel-network', f'''#!/bin/bash

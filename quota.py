@@ -5,7 +5,6 @@ import os
 from pathlib import Path
 import stat
 import tempfile
-from cryptography.fernet import Fernet, InvalidToken
 import secrets
 import sqlite3
 import time
@@ -55,6 +54,7 @@ def link_key_path(database):
 
 
 def read_link_key(path):
+    from cryptography.fernet import Fernet
     try:
         fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
         with os.fdopen(fd, 'rb') as file:
@@ -69,8 +69,11 @@ def read_link_key(path):
 
 
 class Quotas:
-    def __init__(self, path: str):
+    def __init__(self, path: str, *, initialize=True):
         self.path = path
+        self._existing_only = not initialize
+        if not initialize:
+            return  # Hooks use the schema migrated at service startup.
         with self._db() as db:
             db.executescript(SCHEMA)
             db.execute('BEGIN IMMEDIATE')
@@ -92,7 +95,8 @@ class Quotas:
 
     @contextmanager
     def _db(self):
-        db = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        source=Path(self.path).resolve().as_uri()+'?mode=rw' if self._existing_only else self.path
+        db = sqlite3.connect(source, uri=self._existing_only, timeout=30, isolation_level=None)
         try:
             db.row_factory = sqlite3.Row
             db.execute('PRAGMA foreign_keys=ON')
@@ -274,6 +278,7 @@ class Quotas:
         return token
 
     def _encrypt_token(self, token):
+        from cryptography.fernet import Fernet
         path = link_key_path(self.path)
         if not path.exists() and not path.is_symlink():
             with self._db() as db:
@@ -295,6 +300,7 @@ class Quotas:
         return Fernet(read_link_key(path)).encrypt(token.encode('ascii')).decode('ascii')
 
     def remembered_token(self, name):
+        from cryptography.fernet import Fernet, InvalidToken
         with self._db() as db:
             row = self._row(db,name)
             if row['deleted']: raise KeyError(name)
@@ -363,8 +369,8 @@ class Quotas:
             db.execute('DELETE FROM sessions WHERE id=? AND closed=1', (sid,))
             db.execute('INSERT INTO sessions(id,user_id,started_at) VALUES(?,?,?)', (sid, row['id'],now))
             # client-connect runs after certificate authentication, before tunnel admission.
-            db.execute('UPDATE users SET first_connected=COALESCE(first_connected, ?) WHERE id=?',
-                       (now, row['id']))
+            db.execute("UPDATE users SET first_connected=COALESCE(first_connected, ?),last_auth_code='accepted',last_auth_at=? WHERE id=?",
+                       (now,now,row['id']))
 
     def vpn_account(self, name: str, address: str, rx: int, tx: int, *, final=False, now=None):
         """Snapshot/final-hook race safe: a stale snapshot never decreases counters."""
@@ -372,18 +378,45 @@ class Quotas:
             raise ValueError('invalid counters')
         with self._db() as db:
             db.execute('BEGIN IMMEDIATE')
-            row = self._row(db, name)
-            sid = name + '|' + address
-            s = db.execute('SELECT * FROM sessions WHERE id=? AND user_id=?', (sid, row['id'])).fetchone()
-            if s is None:
-                raise KeyError('untracked connection')
-            if not s['closed']:
-                rx, tx = max(rx, s['rx']), max(tx, s['tx'])
-                delta = rx - s['rx'] + tx - s['tx']
-                db.execute('UPDATE users SET used_bytes=used_bytes+? WHERE id=?', (delta, row['id']))
-                db.execute('UPDATE sessions SET rx=?,tx=?,closed=? WHERE id=?', (rx, tx, int(final), sid))
-            state=self._status(self._row(db, name), self._time(now))
-            return replace(state,allowed=False,reason='session_closed') if s['closed'] and not final else state
+            return self._vpn_account(db,name,address,rx,tx,final,self._time(now))
+
+    def _vpn_account(self,db,name,address,rx,tx,final,now):
+        row = self._row(db, name)
+        sid = name + '|' + address
+        s = db.execute('SELECT * FROM sessions WHERE id=? AND user_id=?', (sid, row['id'])).fetchone()
+        if s is None:
+            raise KeyError('untracked connection')
+        if not s['closed']:
+            rx, tx = max(rx, s['rx']), max(tx, s['tx'])
+            delta = rx - s['rx'] + tx - s['tx']
+            db.execute('UPDATE users SET used_bytes=used_bytes+? WHERE id=?', (delta, row['id']))
+            db.execute('UPDATE sessions SET rx=?,tx=?,closed=? WHERE id=?', (rx, tx, int(final), sid))
+        state=self._status(self._row(db, name), self._time(now))
+        return replace(state,allowed=False,reason='session_closed') if s['closed'] and not final else state
+
+    def vpn_account_many(self, entries, now=None):
+        """One durable commit per management snapshot, not one per client.
+
+        Missing/unknown sessions are reported as None so the collector still
+        kills those individual transports. Any unexpected error rolls back the
+        entire snapshot and the collector's existing fail-closed path applies.
+        """
+        entries=list(entries)
+        now=self._time(now)
+        for name,address,rx,tx in entries:
+            if any(type(x) is not int or x<0 or x>2**62 for x in (rx,tx)):
+                raise ValueError('invalid counters')
+        if not entries: return []
+        with self._db() as db:
+            db.execute('BEGIN IMMEDIATE')
+            states=[]
+            for name,address,rx,tx in entries:
+                try: states.append(self._vpn_account(db,name,address,rx,tx,False,now))
+                except KeyError: states.append(None)
+            # Shared quotas must reflect all siblings in this snapshot before
+            # deciding which transports remain allowed.
+            latest={name:self._status(self._row(db,name),now) for name in {s.name for s in states if s is not None}}
+            return [None if s is None else s if s.reason=='session_closed' else latest[s.name] for s in states]
 
     def session_registered(self, name, address):
         with self._db() as db:

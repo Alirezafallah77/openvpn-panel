@@ -103,16 +103,15 @@ def enforce(quotas, management):
     online = []
     snapshot=management.status()
     quotas.reconcile_sessions([(entry[0],entry[1]) for entry in snapshot])
-    for entry in snapshot:
+    states=quotas.vpn_account_many([entry[:4] for entry in snapshot])
+    for entry,state in zip(snapshot,states):
         name,address,rx,tx=entry[:4]
         # With duplicate-cn a name-based kill also disconnects valid siblings.
         # The root management Client ID isolates the rejected transport.
         def disconnect():
             if len(entry)==5: management.kill_client(entry[4])
             else: management.kill(name)  # Legacy/test adapter; production uses IDs.
-        try:
-            state = quotas.vpn_account(name, address, rx, tx)
-        except KeyError:
+        if state is None:
             disconnect()  # Unknown certificates/sessions never get free traffic.
             continue
         if not state.allowed or (REVOCATIONS / ('revoke-' + name)).exists():

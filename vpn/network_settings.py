@@ -419,7 +419,8 @@ def apply_vpn(request):
         if len(re.findall(r'^proto\s+\S+\s*$', text, re.M)) != 1:
             raise ValueError('Unexpected OpenVPN protocol configuration')
         text = re.sub(r'^proto\s+\S+\s*$', 'proto '+('udp4' if chosen=='udp' else 'tcp4-server'), text,count=1,flags=re.M)
-        write(SERVER,text)
+        from vpn.performance import tune_server
+        write(SERVER,tune_server(text))
         conf.update(protocol=chosen, endpoint=remote)
         atomic_json(ROOT/'vpn.json',conf)
         restart_vpn()

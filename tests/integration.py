@@ -127,6 +127,8 @@ def main():
     client = start_client()
     try:
         wait_for(connected, 'real TLS tunnel established')
+        assert '\nfast-io\n' in Path('/etc/openvpn/server/panel.conf').read_text()
+        print('PASS: UDP fast-io enabled without relaxing certificate or quota checks',flush=True)
         wait_for(lambda: q.status('e2e').first_connected is not None, 'first activation persisted')
         # Same certificate, separate transport connections (even the same IP).
         # Additional clients do not install routes or disturb the main tunnel.
@@ -255,6 +257,11 @@ def main():
             client.wait(timeout=10)
             post('/settings/vpn',dict(password=PASSWORD,confirm='1',protocol=chosen,endpoint='vpn.example.invalid'))
             wait_for(completed_vpn,'VPN protocol applied: '+chosen,timeout=60)
+            transport_config=Path('/etc/openvpn/server/panel.conf').read_text()
+            expected_option='fast-io' if chosen=='udp' else 'tcp-nodelay'
+            other_option='tcp-nodelay' if chosen=='udp' else 'fast-io'
+            assert '\n'+expected_option+'\n' in transport_config
+            assert '\n'+other_option+'\n' not in transport_config
             configured=post('/users/e2e/profile',{})
             expected=b'proto tcp4-client' if chosen=='tcp' else b'proto udp4'
             assert expected in configured and b'remote vpn.example.invalid 1194' in configured
