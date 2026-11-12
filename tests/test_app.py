@@ -121,6 +121,21 @@ class WebTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             create_app({'SECRET_KEY': 'short'})
 
+    def test_subscription_transport_selection_stays_scoped_and_csrf_protected(self):
+        self.app.config['VPN_CONFIGURED']=True
+        token=self.q.create_user('alice',100,30)
+        page=self.client.get('/s/'+token)
+        self.assertIn(b'data-device-guide',page.data)
+        with self.client.session_transaction() as session: csrf=session['csrf']
+        with patch('app.request_profile',return_value='client') as broker:
+            response=self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf,transport='tcp'))
+            self.assertEqual(response.status_code,200)
+            broker.assert_called_once_with('alice','download-tcp')
+        with patch('app.request_profile') as broker:
+            self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf,transport='shell')).status_code,400)
+            self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(transport='udp')).status_code,400)
+            broker.assert_not_called()
+
     def test_profile_download_and_broker_failure(self):
         self.login()
         self.q.create_user('alice', 100, 2)
