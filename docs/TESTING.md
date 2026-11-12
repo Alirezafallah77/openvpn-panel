@@ -327,3 +327,17 @@ termination, renewal, TCP internet forwarding, and existing backup/restore and
 revocation tests with dual mode left enabled. Device detection is only a hint;
 manual platform choice and the existing full guide remain available. Provider
 firewall reachability and client-specific import are not established by CI.
+
+Final functional commit `1c0b89f`: unit workflow
+[43193024805](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/43193024805)
+passed on Python 3.12/3.13 (**134 Python and 16 Node tests**). Ubuntu 24.04
+SSH/HTTPS/upgrade workflow
+[43193025364](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/43193025364)
+passed all modes, including real simultaneous listeners, shared quota exhaustion,
+renewal and TCP forwarding, then restore/revocation/fail-closed checks in dual
+mode. Earlier real testing caught the secondary service's read-only /tmp; the
+service now has PrivateTmp=true without removing ProtectSystem=strict. The prior
+fixed commit's real matrix (43192817945) also passed. No live production VPS or
+browser visual audit is claimed. Download names distinguish -udp and -tcp;
+public transport selection remains bearer-scoped, POST+CSRF protected and
+allowlisted. Device-guide tests cover manual override and iPad/iPhone detection.
