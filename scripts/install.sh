@@ -92,6 +92,7 @@ if [[ $CADDY_NEW == 1 ]]; then
   systemctl unmask --runtime caddy.service
   if [[ -z $DOMAIN ]]; then systemctl disable --now caddy.service; fi
 fi
+/opt/openvpn-panel/.venv/bin/python -Es -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from vpn.dual import install_network; install_network()"
 # Make DB before OpenVPN hooks run. All writers use group-compatible journals.
 sudo -u openvpn-panel /opt/openvpn-panel/.venv/bin/python -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from quota import Quotas; Quotas('/var/lib/openvpn-panel/quota.sqlite')"
 chmod 0660 /var/lib/openvpn-panel/quota.sqlite

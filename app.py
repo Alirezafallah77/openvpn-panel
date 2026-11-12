@@ -16,7 +16,7 @@ from werkzeug.security import check_password_hash
 from quota import Quotas, TokenStorageError
 from vpn.client import request_profile, maintenance_request, upload_restore
 from vpn.maintenance import FILENAME
-from metrics import host_metrics, online_users
+from metrics import host_metrics, online_users, connection_transports
 from panel_web import AdminMount, admin_path, public_port, url_for
 from flask import g
 from i18n import LocalizedLoader, translate, format_date, parse_date, date_input
@@ -344,6 +344,9 @@ def create_app(config=None):
         action = request.form.get('action', 'download')
         if action not in ('download', 'rotate'):
             abort(400)
+        selected=request.form.get('transport','')
+        if selected not in ('','udp','tcp') or (selected and action!='download'): abort(400)
+        if selected: action='download-'+selected
         try:
             profile = request_profile(name, action)
         except (ValueError, OSError):
@@ -509,7 +512,7 @@ def create_app(config=None):
         state = quotas.status_by_token(token)
         if state is None:
             abort(404)
-        return render_template('status.html', user=state, token=token, public_page=True)
+        return render_template('status.html', user=state, token=token, public_page=True,transports=connection_transports(app.config['ONLINE_SNAPSHOT']))
 
     @app.post('/s/<token>/profile')
     def subscription_profile(token):
@@ -530,8 +533,11 @@ def create_app(config=None):
             if len(profile_attempts) >= 60 or sum(name == state.name for _, name in profile_attempts) >= 6:
                 abort(429, description='برای دانلود مجدد یک دقیقه صبر کنید.')
             profile_attempts.append((now, state.name))
+        selected=request.form.get('transport','')
+        if selected not in ('','udp','tcp'): abort(400)
+        action='download-'+selected if selected else 'download'
         try:
-            profile = request_profile(state.name, 'download')
+            profile = request_profile(state.name, action)
         except (ValueError, OSError):
             return render_template('message.html', public_page=True,
                                    error='فایل اتصال فعلاً آماده نیست؛ کمی بعد تلاش کنید یا به پشتیبانی اطلاع دهید.'), 503

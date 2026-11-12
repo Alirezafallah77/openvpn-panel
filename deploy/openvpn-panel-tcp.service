@@ -1,0 +1,17 @@
+[Unit]
+Description=OpenVPN panel secondary TCP transport
+ConditionPathExists=/etc/openvpn/server/panel-tcp.conf
+BindsTo=openvpn-panel-accounting.service
+PartOf=openvpn-server@panel.service
+After=openvpn-panel-accounting.service openvpn-panel-network.service
+Requires=openvpn-panel-network.service
+
+[Service]
+Type=simple
+Group=openvpn-panel
+ExecStart=/usr/sbin/openvpn --config /etc/openvpn/server/panel-tcp.conf
+UMask=0007
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/openvpn-panel /run/openvpn-panel

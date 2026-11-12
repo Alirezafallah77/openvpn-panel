@@ -16,7 +16,8 @@ def address(env):
     port = int(env['trusted_port'])
     if not 1 <= port <= 65535:
         raise ValueError('invalid port')
-    return f'[{ip}]:{port}' if ip.version == 6 else f'{ip}:{port}'
+    peer=f'[{ip}]:{port}' if ip.version == 6 else f'{ip}:{port}'
+    return 'tcp@'+peer if env.get('PANEL_TRANSPORT')=='tcp' else peer
 
 
 def run(action, env, quotas, heartbeat=HEARTBEAT):

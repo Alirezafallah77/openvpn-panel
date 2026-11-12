@@ -8,7 +8,7 @@ function harness({present=true,dialog=false}={}) {
   const search={focus(){focused++;},select(){selected++;}};
   const form={querySelector:()=>search,querySelectorAll:()=>selects,requestSubmit(){submitted++;},setAttribute(k,v){this[k]=v;},removeAttribute(k){delete this[k];},addEventListener(k,v){events[k]=v;}};
   selects.forEach(s=>s.addEventListener=(k,v)=>s[k]=v);
-  const context={window:{addEventListener(k,v){events[k]=v;}},document:{querySelector:s=>s==='[data-user-filters]'?(present?form:null):(dialog?{}:null),addEventListener(k,v){keys[k]=v;}}};
+  const context={window:{addEventListener(k,v){events[k]=v;}},document:{querySelector:s=>s==='[data-user-filters]'?(present?form:null):(s==='dialog[open]' && dialog?{}:null),addEventListener(k,v){keys[k]=v;}}};
   vm.runInNewContext('// Keep explicit search/Enter'+source,context);
   return {form,events,selects,counts:()=>({submitted,focused,selected,prevented}),key(overrides={}){keys.keydown?.({key:'/',target:{closest:()=>null},preventDefault(){prevented++;},...overrides});}};
 }

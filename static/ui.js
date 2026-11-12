@@ -334,3 +334,19 @@ if (userFilters) {
     search.select();
   });
 }
+
+const deviceGuide=document.querySelector('[data-device-guide]');
+if(deviceGuide) {
+  const select=deviceGuide.querySelector('[data-device-select]');
+  const agent=navigator.userAgent || '';
+  if(/iPhone|iPad|iPod/i.test(agent) || (navigator.platform==='MacIntel' && navigator.maxTouchPoints>1)) select.value='ios';
+  else if(/Windows/i.test(agent)) select.value='windows';
+  deviceGuide.querySelector('[data-open-device-guide]').addEventListener('click',event=>{
+    const mainTab=document.getElementById('tab-guide');
+    const target=document.getElementById('tab-'+select.value);
+    if(mainTab && target) {
+      event.preventDefault(); mainTab.click(); target.click(); target.focus();
+      target.scrollIntoView({block:'center',behavior:'auto'});
+    }
+  });
+}

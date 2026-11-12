@@ -40,6 +40,7 @@ install -d -o root -g openvpn-panel -m 0710 /var/lib/openvpn-panel-backups /var/
 install -m 0755 "$SOURCE/scripts/panelctl.py" /usr/local/sbin/openvpn-panelctl
 install -m 0644 "$SOURCE"/deploy/*.service "$SOURCE"/deploy/*.timer /etc/systemd/system/
 install -m 0644 "$SOURCE/deploy/openvpn-override.conf" /etc/systemd/system/openvpn-server@panel.service.d/panel.conf
+/opt/openvpn-panel/.venv/bin/python -Es -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from vpn.dual import install_network; install_network()"
 systemctl daemon-reload
 /opt/openvpn-panel/.venv/bin/python -Es -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from vpn.network_settings import bootstrap; bootstrap(bool(int(sys.argv[1])))" "$CADDY_NEW"
 if [[ $CADDY_NEW == 1 ]]; then
@@ -54,6 +55,7 @@ fi
 # Apply conservative transport options to existing installs without regenerating
 # CA, certificates, endpoint, MTU or cipher configuration.
 /opt/openvpn-panel/.venv/bin/python -Es -c "import sys; sys.path.insert(0,'/opt/openvpn-panel'); from pathlib import Path; from vpn.performance import tune_server; p=Path('/etc/openvpn/server/panel.conf'); p.write_text(tune_server(p.read_text()))"
+systemctl restart openvpn-panel-network.service
 /usr/local/sbin/openvpn-panelctl restart
 systemctl enable --now openvpn-panel-backup.timer
 for service in openvpn-panel openvpn-panel-pki openvpn-panel-accounting openvpn-server@panel; do

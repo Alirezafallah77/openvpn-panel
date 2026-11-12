@@ -56,3 +56,14 @@ def summaries(users, online):
                 exhausted=sum(u.used_bytes >= u.limit_bytes for u in users),
                 online=None if online is None else len({u.name for u in users} & online),
                 traffic=sum(u.used_bytes for u in users))
+
+
+def connection_transports(path,now=None):
+    """Only advertise alternatives verified by the fresh collector snapshot."""
+    now=time.time() if now is None else now
+    try:
+        data=json.loads(Path(path).read_text())
+        if 0<=now-data['updated_at']<=15 and data.get('transports')==['udp','tcp']:
+            return ['udp','tcp']
+    except (OSError,ValueError,KeyError,TypeError): pass
+    return []

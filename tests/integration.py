@@ -273,6 +273,40 @@ def main():
                 '--retry','2','--retry-all-errors','--resolve',f'github.com:443:{github_ip}',
                 '--output','/tmp/vpn-protocol-proof.txt','https://github.com/robots.txt')
         print('PASS: UDP/TCP switching preserves users and serves internet on both transports',flush=True)
+        client.terminate()
+        client.wait(timeout=10)
+        post('/settings/vpn',dict(password=PASSWORD,confirm='1',protocol='dual',endpoint='vpn.example.invalid'))
+        wait_for(completed_vpn,'dual UDP/TCP listeners ready',timeout=60)
+        post('/users/e2e/limits',dict(gib=1,days=30,max_connections=2))
+        udp_profile=post('/users/e2e/profile',dict(transport='udp'))
+        tcp_profile=post('/users/e2e/profile',dict(transport='tcp'))
+        assert b'proto udp4' in udp_profile and b'proto tcp4-client' in tcp_profile
+        Path('/tmp/e2e.ovpn').write_bytes(udp_profile)
+        Path('/tmp/e2e-tcp.ovpn').write_bytes(tcp_profile)
+        client=start_client()
+        wait_for(connected,'UDP connects while TCP listener is active')
+        tcp_log=Path('/tmp/e2e-dual-tcp.log')
+        tcp_peer=subprocess.Popen(['ip','netns','exec','ovp-test','openvpn','--config','/tmp/e2e-tcp.ovpn','--log',str(tcp_log),'--route-noexec','--ifconfig-noexec','--connect-retry','1','1'])
+        try:
+            wait_for(lambda: tcp_log.exists() and 'Initialization Sequence Completed' in tcp_log.read_text(),'same certificate connects over TCP and UDP simultaneously')
+            wait_for(lambda: active_count()==2,'both transports share SQL session slots')
+            with q._db() as db:
+                assert db.execute("SELECT count(*) FROM sessions WHERE closed=0 AND id LIKE '%|tcp@%'").fetchone()[0]==1
+            with q._db() as db:
+                db.execute("UPDATE users SET used_bytes=limit_bytes WHERE name='e2e'")
+            wait_for(no_open_session,'shared quota disconnects both transports')
+        finally:
+            tcp_peer.terminate()
+            tcp_peer.wait(timeout=10)
+        client.terminate()
+        client.wait(timeout=10)
+        post('/users/e2e/limits',dict(gib=1,days=30,max_connections=1,reset_plan=1))
+        Path('/tmp/e2e.ovpn').write_bytes(tcp_profile)
+        client=start_client()
+        wait_for(connected,'renewed shared account connects through TCP listener')
+        cmd('ip','netns','exec','ovp-test','curl','--noproxy','*','--fail','--max-time','25','--retry','2','--retry-all-errors','--resolve',f'github.com:443:{github_ip}','--output','/tmp/vpn-dual-proof.txt','https://github.com/robots.txt')
+        print('PASS: dual listeners share certificate, usage, slots and renewal; TCP forwards internet traffic',flush=True)
+
         # Web-managed encryption; no real Telegram token or public bot required.
         def copied_token():
             page=post('/users/e2e/link',{}).decode()

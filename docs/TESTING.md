@@ -307,3 +307,23 @@ passed SSH, HTTPS and legacy-upgrade modes, including UDP fast-io, TCP NODELAY,
 forwarded HTTPS traffic, per-client quota/cap enforcement, renewal, revocation,
 safe username reuse, backup/restore and fail-closed accounting. These runners
 validate compatibility and safety, not production internet-speed improvement.
+
+### Simultaneous transports and connection portal
+
+Dual mode is opt-in in VPN settings. UDP remains the primary listener, TCP uses
+an isolated tunnel/subnet/socket and derived firewall rules with the same private
+network isolation. Both listeners use the same CA, CRL, certificate, transactional
+admission database and accounting snapshot. TCP session addresses and management
+Client IDs are namespaced; reconciliation only happens after both full snapshots
+are collected. Either collector/socket failure stops admissions and the listeners
+remain bound to fail-closed accounting. Secondary startup never resets primary
+sessions. Settings rollback includes the optional secondary configuration, and
+backup restore preserves destination transport settings.
+
+Local tests cover derivation, firewall separation, shared slots/usage, per-listener
+kills, fresh-only public alternatives and non-rotating UDP/TCP profile issuance.
+Real integration adds simultaneous same-certificate connections, shared exhaustion
+termination, renewal, TCP internet forwarding, and existing backup/restore and
+revocation tests with dual mode left enabled. Device detection is only a hint;
+manual platform choice and the existing full guide remain available. Provider
+firewall reachability and client-specific import are not established by CI.

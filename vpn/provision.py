@@ -22,7 +22,7 @@ def command(*args):
 def profile(name, action='download', root=ROOT):
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,64}', name, re.ASCII):
         raise ValueError('invalid name')
-    if action not in ('download', 'rotate'):
+    if action not in ('download', 'rotate','download-udp','download-tcp'):
         raise ValueError('invalid action')
     pki = root / 'pki'
     with (pki / 'lock').open('a') as lock:
@@ -32,8 +32,11 @@ def profile(name, action='download', root=ROOT):
             if identity is None: raise ValueError('unknown user')
         conf = json.loads((root / 'vpn.json').read_text())
         chosen = conf.get('protocol','udp')
-        if chosen not in ('udp','tcp'):
+        if chosen not in ('udp','tcp','dual'):
             raise ValueError('invalid protocol')
+        requested=action.removeprefix('download-') if action.startswith('download-') else None
+        if requested and chosen!='dual' and requested!=chosen: raise ValueError('Transport unavailable')
+        chosen=requested or ('udp' if chosen=='dual' else chosen)
         transport = 'udp4' if chosen == 'udp' else 'tcp4-client'
         base = pki / ('client-' + name)
         key, csr, cert = (Path(str(base) + ext) for ext in ('.key', '.csr', '.crt'))

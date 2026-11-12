@@ -82,6 +82,16 @@ extendedKeyUsage=clientAuth
         q.update_limits('alice',100,30,reset_usage=True,renew_now=True)
         self.assertEqual(replacement,profile('alice',root=self.root))
 
+    def test_dual_profiles_share_one_certificate_and_do_not_rotate(self):
+        (self.root/'vpn.json').write_text('{"endpoint":"192.0.2.1","port":1194,"protocol":"dual"}')
+        udp=profile('alice','download-udp',self.root)
+        certificate=(self.pki/'client-alice.crt').read_bytes()
+        tcp=profile('alice','download-tcp',self.root)
+        self.assertIn('proto udp4',udp)
+        self.assertIn('proto tcp4-client',tcp)
+        self.assertEqual(certificate,(self.pki/'client-alice.crt').read_bytes())
+        self.assertEqual(self.verify(self.pki/'client-alice.crt'),0)
+
     def tearDown(self):
         self.patch_db.stop()
         self.patch_revocations.stop()

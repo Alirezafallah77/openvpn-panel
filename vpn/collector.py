@@ -121,6 +121,30 @@ def enforce(quotas, management):
     return online
 
 
+class CombinedManagement:
+    """Read both complete snapshots before reconciling shared session slots.
+
+    Client IDs and peer addresses are namespaced; a TCP kill can never target
+    a UDP sibling. Failure of either socket fails the whole collector closed.
+    """
+    def __init__(self,primary,secondary):
+        self.primary,self.secondary=primary,secondary
+
+    def status(self):
+        udp=self.primary.status()
+        tcp=self.secondary.status()
+        return [(n,a,rx,tx,('udp',cid)) for n,a,rx,tx,cid in udp]+[(n,'tcp@'+a,rx,tx,('tcp',cid)) for n,a,rx,tx,cid in tcp]
+
+    def kill_client(self,identity):
+        transport,cid=identity
+        if transport not in ('udp','tcp'): raise ValueError('invalid transport')
+        (self.secondary if transport=='tcp' else self.primary).kill_client(cid)
+
+    def close(self):
+        try: self.primary.close()
+        finally: self.secondary.close()
+
+
 def notify(message):
     """Minimal sd_notify; watchdog also catches an alive but stalled collector."""
     destination = os.environ.get('NOTIFY_SOCKET')
@@ -145,6 +169,15 @@ def main():
         notify('WATCHDOG=1')
         time.sleep(0.2)
     management = Management()
+    from vpn.dual import SECONDARY,TCP_SOCKET
+    dual=SECONDARY.exists()
+    if dual:
+        started=time.monotonic()
+        while not Path(TCP_SOCKET).exists():
+            if time.monotonic()-started>45: raise TimeoutError('TCP management unavailable')
+            notify('WATCHDOG=1')
+            time.sleep(0.2)
+        management=CombinedManagement(management,Management(TCP_SOCKET))
     try:
         while True:
             online = enforce(quotas, management)
@@ -157,7 +190,7 @@ def main():
                     if marker.name[7:] not in live:
                         marker.unlink(missing_ok=True)
             temporary = SNAPSHOT.with_suffix('.new')
-            temporary.write_text(json.dumps(dict(updated_at=time.time(), users=online)))
+            temporary.write_text(json.dumps(dict(updated_at=time.time(), users=online,transports=['udp','tcp'] if dual else [])))
             temporary.chmod(0o640)
             temporary.replace(SNAPSHOT)
             Path(HEARTBEAT).touch(mode=0o600)

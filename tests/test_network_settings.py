@@ -126,11 +126,11 @@ class NetworkSettingsTests(unittest.TestCase):
         n.restart_vpn.assert_not_called()
 
     def test_failed_tls_rolls_back_host_endpoint_and_caddy(self):
-        original={k:p.read_bytes() for k,p in n.paths().items()}
+        original={k:p.read_bytes() if p.exists() else None for k,p in n.paths().items()}
         n.queue(dict(operation='ssl-save',domain='new.example.com',use_for_vpn=True))
         n.wait_tls.side_effect=RuntimeError('certificate not issued')
         n.apply_pending()
-        for key,path in n.paths().items(): self.assertEqual(path.read_bytes(),original[key])
+        for key,path in n.paths().items(): self.assertEqual(path.read_bytes() if path.exists() else None,original[key])
         self.assertEqual(json.loads((self.root/'settings-state.json').read_text())['status'],'failed')
         self.assertFalse((self.root/'settings-pending.json').exists())
 

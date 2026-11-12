@@ -69,7 +69,7 @@ def endpoint(value):
 
 
 def protocol(value):
-    if value not in ('udp', 'tcp'):
+    if value not in ('udp', 'tcp', 'dual'):
         raise ValueError('Protocol must be UDP or TCP')
     return value
 
@@ -244,12 +244,12 @@ def snapshot():
 
 
 def paths():
-    return dict(env=ROOT/'panel.env', vpn=ROOT/'vpn.json', server=SERVER, caddy=CADDY)
+    return dict(env=ROOT/'panel.env', vpn=ROOT/'vpn.json', server=SERVER, secondary=SERVER.with_name('panel-tcp.conf'), caddy=CADDY)
 
 
 def restore_files(saved):
     for key,path in paths().items():
-        data = saved['files'][key]
+        data = saved['files'].get(key)
         if data is None:
             path.unlink(missing_ok=True)
         else:
@@ -418,9 +418,12 @@ def apply_vpn(request):
         text = SERVER.read_text()
         if len(re.findall(r'^proto\s+\S+\s*$', text, re.M)) != 1:
             raise ValueError('Unexpected OpenVPN protocol configuration')
-        text = re.sub(r'^proto\s+\S+\s*$', 'proto '+('udp4' if chosen=='udp' else 'tcp4-server'), text,count=1,flags=re.M)
+        text = re.sub(r'^proto\s+\S+\s*$', 'proto '+('udp4' if chosen in ('udp','dual') else 'tcp4-server'), text,count=1,flags=re.M)
         from vpn.performance import tune_server
-        write(SERVER,tune_server(text))
+        from vpn.dual import sync_secondary
+        text=tune_server(text)
+        sync_secondary(text,chosen=='dual',SERVER.with_name('panel-tcp.conf'))
+        write(SERVER,text)
         conf.update(protocol=chosen, endpoint=remote)
         atomic_json(ROOT/'vpn.json',conf)
         restart_vpn()

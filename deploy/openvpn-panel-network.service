@@ -7,6 +7,8 @@ Before=openvpn-server@panel.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/openvpn-panel-network start
+ExecStartPost=/usr/local/sbin/openvpn-panel-network-tcp start
+ExecStopPost=/usr/local/sbin/openvpn-panel-network-tcp stop
 ExecStop=/usr/local/sbin/openvpn-panel-network stop
 RemainAfterExit=yes
 
