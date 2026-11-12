@@ -353,8 +353,9 @@ def create_app(config=None):
             app.logger.error('VPN profile helper failed')
             return render_template('message.html', error='ساخت فایل اتصال ناموفق بود؛ وضعیت سرویس و PKI را بررسی کنید.'), 503
         app.logger.info('Admin profile operation=%s user=%s', action, name)
+        suffix='-'+selected if selected else ''
         return Response(profile, mimetype='application/x-openvpn-profile', headers={
-            'Content-Disposition': f'attachment; filename="{name}.ovpn"'})
+            'Content-Disposition': f'attachment; filename="{name}{suffix}.ovpn"'})
 
     def privileged(message):
         if not app.config['VPN_CONFIGURED']:
@@ -541,8 +542,9 @@ def create_app(config=None):
         except (ValueError, OSError):
             return render_template('message.html', public_page=True,
                                    error='فایل اتصال فعلاً آماده نیست؛ کمی بعد تلاش کنید یا به پشتیبانی اطلاع دهید.'), 503
+        suffix='-'+selected if selected else ''
         return Response(profile, mimetype='application/x-openvpn-profile', headers={
-            'Content-Disposition': f'attachment; filename="{state.name}.ovpn"',
+            'Content-Disposition': f'attachment; filename="{state.name}{suffix}.ovpn"',
             'X-Robots-Tag': 'noindex, nofollow, noarchive'})
 
     @app.template_filter('utc')

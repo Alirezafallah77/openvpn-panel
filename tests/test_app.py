@@ -131,6 +131,7 @@ class WebTests(unittest.TestCase):
             response=self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf,transport='tcp'))
             self.assertEqual(response.status_code,200)
             broker.assert_called_once_with('alice','download-tcp')
+            self.assertIn('alice-tcp.ovpn',response.headers['Content-Disposition'])
         with patch('app.request_profile') as broker:
             self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(csrf=csrf,transport='shell')).status_code,400)
             self.assertEqual(self.client.post('/s/'+token+'/profile',data=dict(transport='udp')).status_code,400)
