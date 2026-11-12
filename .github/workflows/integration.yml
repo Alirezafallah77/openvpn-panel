@@ -98,14 +98,14 @@ jobs:
         if: failure()
         run: |
           sudo systemctl status openvpn-panel openvpn-panel-accounting openvpn-server@panel --no-pager || true
-          sudo journalctl -u openvpn-panel -u openvpn-panel-accounting -u openvpn-panel-pki -u openvpn-server@panel --no-pager -n 150
+          sudo journalctl -u openvpn-panel -u openvpn-panel-accounting -u openvpn-panel-pki -u openvpn-panel-tcp -u 'openvpn-panel-settings-*' -u openvpn-server@panel --no-pager -n 150
           sudo tail -n 80 /tmp/e2e-client.log || true
       - name: Publish sanitized test diagnostics as a check
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          sudo journalctl -u openvpn-panel -u openvpn-panel-accounting -u openvpn-panel-pki -u openvpn-server@panel --no-pager -n 100 > /tmp/panel-services.log
+          sudo journalctl -u openvpn-panel -u openvpn-panel-accounting -u openvpn-panel-pki -u openvpn-panel-tcp -u 'openvpn-panel-settings-*' -u openvpn-server@panel --no-pager -n 100 > /tmp/panel-services.log
           sudo chmod a+r /tmp/e2e-client.log 2>/dev/null || true
           python3 - <<'PYCODE'
           import json, os, pathlib, subprocess, time

@@ -261,6 +261,8 @@ def restart_vpn():
     systemctl('stop','openvpn-panel-accounting.service')
     systemctl('reset-failed','openvpn-server@panel.service','openvpn-panel-accounting.service')
     systemctl('start','openvpn-server@panel.service')
+    if SERVER.with_name('panel-tcp.conf').exists():
+        systemctl('start','openvpn-panel-tcp.service')
     end = time.monotonic()+20
     while time.monotonic() < end:
         try:

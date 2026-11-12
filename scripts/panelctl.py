@@ -40,6 +40,8 @@ def restart():
     systemctl('stop', 'openvpn-panel-accounting.service')
     systemctl('reset-failed', 'openvpn-panel.service', 'openvpn-panel-pki.service', 'openvpn-panel-accounting.service', 'openvpn-server@panel.service')
     systemctl('start', 'openvpn-server@panel.service')
+    if Path('/etc/openvpn/server/panel-tcp.conf').exists():
+        systemctl('start','openvpn-panel-tcp.service')
     wait_accounting()
     systemctl('restart', 'openvpn-panel.service', 'openvpn-panel-pki.service')
 
