@@ -297,3 +297,13 @@ with eager crypto import and schema setup **50.21 ms**, runtime existing-DB path
 reproduce with a disposable database. These are control-path measurements, not
 internet throughput, TLS handshake timing, full hook timing or a production VPS
 speed guarantee. SQLite fsync/storage and host scheduling strongly affect them.
+
+Verified functional commit `7513385`: unit workflow
+[43189294438](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/43189294438)
+passed on Python 3.12/3.13 (129 Python tests and 14 Node tests). Real Ubuntu 24.04
+workflow
+[43189294425](https://github.com/Alirezafallah77/openvpn-panel/actions/runs/43189294425)
+passed SSH, HTTPS and legacy-upgrade modes, including UDP fast-io, TCP NODELAY,
+forwarded HTTPS traffic, per-client quota/cap enforcement, renewal, revocation,
+safe username reuse, backup/restore and fail-closed accounting. These runners
+validate compatibility and safety, not production internet-speed improvement.
